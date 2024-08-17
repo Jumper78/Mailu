@@ -1,0 +1,48 @@
+{%- extends "base.html" %}
+
+{%- block title %}
+{% trans %}Domain keys{% endtrans %}
+{%- endblock %}
+
+{%- block subtitle %}
+{{ domain.name }}
+{%- endblock %}
+
+{%- block content %}
+{%- call macros.table(datatable=False) %}
+<tr>
+  <th>{% trans %}Domain name{% endtrans %}</th>
+  <td>{{ domain.name }}</td>
+</tr>
+<tr>
+  <th>{% trans %}DKIM Private Key{% endtrans %}</th>
+  <td>{{ macros.clip("dkim_private") }}<pre id="dkim_private" class="pre-config border bg-light">{{ domain.dkim_key }}</pre></td>
+</tr>
+{%- if domain.dkim_publickey %}
+<tr>
+  <th>{% trans %}DNS DKIM entry{% endtrans %}</th>
+  <td>{{ macros.clip("dns_dkim") }}<pre id="dns_dkim" class="pre-config border bg-light">{{ domain.dns_dkim }}</pre></td>
+</tr>
+{%- endif %}
+{%- endcall %}
+
+{%- for alternative in domain.alternatives %}
+
+{%- call macros.table(datatable=False) %}
+<tr>
+  <th>{% trans %}Alternative Domain name{% endtrans %}</th>
+  <td>{{ alternative.name }}</td>
+</tr>
+<tr>
+  <th>{% trans %}DKIM Private Key{% endtrans %}</th>
+  <td>{{ macros.clip("dkim_private") }}<pre id="dkim_private" class="pre-config border bg-light">{{ alternative.dkim_key }}</pre></td>
+</tr>
+{%- if alternative.domain.dkim_publickey %}
+<tr>
+  <th>{% trans %}DNS DKIM entry{% endtrans %}</th>
+  <td>{{ macros.clip("dns_dkim") }}<pre id="dns_dkim" class="pre-config border bg-light">{{ alternative.dns_dkim }}</pre></td>
+</tr>
+{%- endif %}
+{%- endcall %}
+{%- endfor %}
+{%- endblock %}

@@ -62,6 +62,10 @@ msgstr ""
 msgid "change language"
 msgstr ""
 
+#: mailu/sso/templates/base_sso.html:37 mailu/ui/templates/base.html:82
+msgid "Imprint"
+msgstr ""
+
 #: mailu/sso/templates/sidebar_sso.html:4 mailu/ui/templates/sidebar.html:96
 msgid "Go to"
 msgstr ""

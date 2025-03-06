@@ -41,6 +41,10 @@ msgstr "Zijbalk in/uitklappen"
 msgid "change language"
 msgstr "kies taal"
 
+#: mailu/sso/templates/base_sso.html:37 mailu/ui/templates/base.html:82
+msgid "Imprint"
+msgstr "Afdruk"
+
 #: mailu/sso/templates/sidebar_sso.html:4 mailu/ui/templates/sidebar.html:94
 msgid "Go to"
 msgstr "Ga naar"

@@ -71,13 +71,22 @@
         </div>
       </div>
       <footer class="main-footer">
-        Built with <i class="fa fa-heart text-danger" aria-hidden="true"></i><span class="sr-only">love</span>
-        using <a href="https://flask.palletsprojects.com/">Flask</a>
-        and <a href="https://adminlte.io/themes/v3/index3.html">AdminLTE</a>.
-        <span class="fa-pull-right">
-          <i class="fa fa-code-branch" aria-hidden="true"></i><span class="sr-only">fork</span>
-          on <a href="https://github.com/Mailu/Mailu">Github</a>
-        </span>
+        <div class="d-flex flex-row justify-content-between">
+          <div class="p-2">
+            Built with <i class="fa fa-heart text-danger" aria-hidden="true"></i><span class="sr-only">love</span>
+            using <a href="https://flask.palletsprojects.com/">Flask</a>
+            and <a href="https://adminlte.io/themes/v3/index3.html">AdminLTE</a>.
+          </div>
+          {%- if config["IMPRINT_URL"] %}
+          <div class="p-2">
+            <a href="{{ config["IMPRINT_URL"] }}">Imprint / Impressum</a>
+          </div>
+          {%- endif %}
+          <div class="p-2">
+            <i class="fa fa-code-branch" aria-hidden="true"></i><span class="sr-only">fork</span>
+            on <a href="https://github.com/Mailu/Mailu">Github</a>
+          </div>
+        </div>
       </footer>
     </div>
     <script src="{{ url_for('static', filename='vendor.js') }}"></script>

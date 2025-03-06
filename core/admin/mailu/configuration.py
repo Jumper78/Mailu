@@ -64,6 +64,7 @@ DEFAULT_CONFIG = {
     # Web settings
     'SITENAME': 'Mailu',
     'WEBSITE': 'https://mailu.io',
+    'IMPRINT_URL': '',
     'ADMIN': 'none',
     'WEB_ADMIN': '/admin',
     'WEB_WEBMAIL': '/webmail',

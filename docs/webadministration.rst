@@ -284,6 +284,20 @@ Details
 
 This page is also accessible for domain managers. On the details page all DNS settings are displayed for configuring your DNS server. It contains information on what to configure as MX record and SPF record. On this page it is also possible to (re-)generate the keys for DKIM and DMARC. The option for generating keys for DKIM and DMARC is only available for global administrators.  After generating the keys for DKIM and DMARC, this page will also show the DNS records for configuring the DKIM/DMARC records on the DNS server. If you have configured alternative domains (see `Alternatives` below), you will find the MX, SPF, DKIM, and DMARC records of the alternative domains below the entries of the main domain. You can also download a zonefile for easy upload to your nameserver.
 
+The different DNS entries have the following purposes:
+
+==========================  =====================================================================================  ================================================================================
+Entry                       Purpose                                                                                Link to further information
+==========================  =====================================================================================  ================================================================================
+DNS MX entry                tell other e-mail servers which server to contact to deliver e-mail for the domain     https://en.wikipedia.org/wiki/MX_record
+DNS SPF entry               tell other e-mail servers wich servers are allowed to send e-mails for this domain     https://en.wikipedia.org/wiki/Sender_Policy_Framework
+DNS DKIM entry              add additional security by having the sending servers signing the e-mail sent          https://en.wikipedia.org/wiki/DomainKeys_Identified_Mail
+DNS DMARC entry (1st line)  tell the recipient servers what to do with e-mails when DKIM and/or SPF fail           https://en.wikipedia.org/wiki/DMARC#DNS_record
+DNS DMARC entry (2nd line)  request servers to send back DMARC reports regularly (line is only shown when needed)  https://en.wikipedia.org/wiki/DMARC#Reports
+DNS TLSA entry              tell the clients about the encryption root certificate (assumption: letsencrypt)       https://en.wikipedia.org/wiki/DNS-based_Authentication_of_Named_Entities#TLSA_RR
+auto-configuration entries  tell e-mail clients what the SMPT-, POP-, IMAP-servers are and which ports they use    https://www.axigen.com/documentation/dns-based-service-discovery-p47120690
+==========================  =====================================================================================  ================================================================================
+Depending on the purpose of your e-mail domain, you might whant to choose which entries you put into the DNS system.
 
 Edit
 ````

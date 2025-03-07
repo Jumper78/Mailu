@@ -75,3 +75,5 @@ Once the DNS changes to your host have propagated (and if SSL / domain rules wer
 dashboard at https://example.com/admin/domain/details/example.com. Click on `regenerate keys` and add the required
 records to your DNS provider. If you've enabled DKIM/SPF / DMARC and haven't added these entries, your mail might
 not get delivered.
+
+More information about the DNS entries can be found in the documentation of the :ref:`webadministration`.

@@ -4,7 +4,7 @@
 # Note when updating the alpine tag, first manually run the workflow .github/workflows/mirror.yml.
 # Just run the workflow with the tag that must be synchronised.
 # ARG DISTRO=ghcr.io/mailu/alpine:3.21.4
-ARG DISTRO=docker.io/alpine:3.23.0
+ARG DISTRO=docker.io/alpine:3.22
 FROM $DISTRO as system
 
 ENV TZ=Etc/UTC LANG=C.UTF-8

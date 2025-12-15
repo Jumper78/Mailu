@@ -33,5 +33,6 @@ for script_file in glob.glob("/conf/*.script"):
 os.system("chown mail:mail /mail")
 os.system("chown -R mail:mail /var/lib/dovecot /conf")
 
+multiprocessing.Process(target=start_podop).start()
 cmd = ['/usr/sbin/dovecot', '-c', '/etc/dovecot/dovecot.conf', '-F']
 system.run_process_and_forward_output(cmd)

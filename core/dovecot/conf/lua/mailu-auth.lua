@@ -9,7 +9,11 @@ local http_client = nil
 function script_init(args)
     admin_url = args["admin_url"] or "http://admin:8080"
     
-    http_client = dovecot.http.client()
+    http_client = dovecot.http.client {
+        request_timeout = 10000,
+        request_max_attempts = 3,
+        user_agent = "Dovecot-Mailu/2.4"
+    }
     
     return 0
 end
@@ -121,6 +125,7 @@ function report_quota_update(user, bytes_used)
     local resp = http_req:submit()
     return resp:status() == 200
 end
+
 
 
 

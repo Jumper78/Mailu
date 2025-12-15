@@ -111,4 +111,19 @@ function auth_userdb_iterate()
     end
     
     return {}
+
+end
+
+function report_quota_update(user, bytes_used)
+    local url = admin_url .. "/internal/dovecot/quota/storage/" .. user
+    
+    local http_req = http_client:request {
+        url = url,
+        method = "POST"
+    }
+    http_req:add_header("Content-Type", "application/json")
+    http_req:set_payload(tostring(bytes_used))
+    
+    local resp = http_req:submit()
+    return resp:status() == 200
 end

@@ -11,8 +11,6 @@ function script_init(args)
     
     http_client = dovecot.http.client {
         timeout = 10000,
-        max_attempts = 3,
-        connect_timeout = 5000,
         debug = false,
         user_agent = "Dovecot-Mailu/2.4"
     }
@@ -127,3 +125,4 @@ function report_quota_update(user, bytes_used)
     local resp = http_req:submit()
     return resp:status() == 200
 end
+

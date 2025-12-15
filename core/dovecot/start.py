@@ -11,6 +11,14 @@ system.set_env(log_filters=[
     rb'Error\: SSL context initialization failed, disabling SSL\: Can\'t load SSL certificate \(ssl_cert setting\)\: The certificate is empty$'
 ])
 
+def start_podop():
+    system.drop_privs_to('mail')
+    url = "http://" + os.environ["ADMIN_ADDRESS"] + ":8080/internal/dovecot/§"
+    run_server(0, "dovecot", "/tmp/podop.socket", [
+		("quota", "url", url ),
+		("sieve", "url", url),
+    ])
+
 # Actual startup script
 for dovecot_file in glob.glob("/conf/*.conf"):
     conf.jinja(dovecot_file, os.environ, os.path.join("/etc/dovecot", os.path.basename(dovecot_file)))

@@ -9,9 +9,7 @@ local http_client = nil
 function script_init(args)
     admin_url = args["admin_url"] or "http://admin:8080"
     
-    http_client = dovecot.http.client {
-        debug = false
-    }
+    http_client = dovecot.http.client()
     
     return 0
 end
@@ -123,5 +121,6 @@ function report_quota_update(user, bytes_used)
     local resp = http_req:submit()
     return resp:status() == 200
 end
+
 
 

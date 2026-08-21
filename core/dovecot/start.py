@@ -16,7 +16,6 @@ def start_podop():
     url = "http://" + os.environ["ADMIN_ADDRESS"] + ":8080/internal/dovecot/§"
     run_server(0, "dovecot", "/tmp/podop.socket", [
 		("quota", "url", url ),
-		("auth", "url", url),
 		("sieve", "url", url),
     ])
 

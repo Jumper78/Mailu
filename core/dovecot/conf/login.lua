@@ -109,6 +109,12 @@ function auth_userdb_iterate()
         url = "http://{{ ADMIN_ADDRESS }}:8080/internal/dovecot/userdb/";
     }
     local auth_response = auth_request:submit()
+    local resp_status = auth_response:status()
 
-    return json.decode(auth_response:payload())
+    if resp_status == 200
+    then
+        return json.decode(auth_response:payload())
+    else
+        return {}
+    end
 end

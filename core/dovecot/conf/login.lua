@@ -7,9 +7,15 @@ end
 function script_deinit()
 end
 
+-- 2.3 called these timeout and max_attempts. In 2.4 the table keys are the
+-- http_client_* setting names without the prefix: parse_client_settings() in
+-- src/lib-lua/dlua-dovecot-http.c prepends "http_client_" and rejects anything
+-- that does not resolve. request_timeout needs an explicit unit in 2.4 - a
+-- bare number is rejected with "Time interval is missing units" - so the
+-- previous 2000 (milliseconds) is written as "2s".
 local http_client = dovecot.http.client {
-    timeout = 2000;
-    max_attempts = 3;
+    request_timeout = "2s";
+    request_max_attempts = 3;
 }
 
 function urlEncode(str)
@@ -27,9 +33,13 @@ function setRequestHeadersFromDovecotRequest(auth_request, req)
         local password = urlEncode(req.password)
         auth_request:add_header('Auth-Pass', password)
     end
-    if req.service ~= nil
+    -- 2.3: req.service. The lua request fields are the variable expansion
+    -- table (auth_request_lua_index() in src/auth/db-lua.c), and 2.4 renamed
+    -- that entry to protocol, so req.service is nil there and the header was
+    -- silently left out.
+    if req.protocol ~= nil
     then
-        auth_request:add_header('Auth-Protocol', req.service)
+        auth_request:add_header('Auth-Protocol', req.protocol)
     end
 
     if req.remote_ip ~= nil
@@ -52,22 +62,12 @@ function setRequestHeadersFromDovecotRequest(auth_request, req)
     end
 end
 
-function formatJsonToKeyValueString(json_str)
-    local data = json.decode(json_str)
-    local result = {}
-
-    for key, value in pairs(data) do
-        local formatted_value
-        if value == nil then
-            formatted_value = ""
-        else
-            formatted_value = tostring(value)
-        end
-        table.insert(result, key .. "=" .. formatted_value)
-    end
-
-    return table.concat(result, " ")
-end
+-- 2.3 expected the extra fields as a "key=value key=value" string, which is
+-- what formatJsonToKeyValueString() used to build. 2.4 expects a table on
+-- success (auth_lua_call_lookup() in src/auth/db-lua.c: "expected nil or
+-- table"), and json.decode already returns exactly that, so the whole
+-- conversion is gone. A JSON null decodes to nil and therefore drops out of
+-- the table, which is what should happen to the admin API's "password": null.
 
 function auth_passdb_lookup(req)
     local auth_request = http_client:request {
@@ -79,7 +79,7 @@ function auth_passdb_lookup(req)
 
     if resp_status == 200
     then
-        return dovecot.auth.PASSDB_RESULT_OK, formatJsonToKeyValueString(auth_response:payload())
+        return dovecot.auth.PASSDB_RESULT_OK, json.decode(auth_response:payload())
     else
         return dovecot.auth.PASSDB_RESULT_USER_UNKNOWN, ""
     end
@@ -95,10 +95,7 @@ function auth_userdb_lookup(req)
 
     if resp_status == 200
     then
-        local json_body = auth_response:payload()
-        local result_str = formatJsonToKeyValueString(json_body)
-
-        return dovecot.auth.USERDB_RESULT_OK, result_str
+        return dovecot.auth.USERDB_RESULT_OK, json.decode(auth_response:payload())
     else
         return dovecot.auth.USERDB_RESULT_USER_UNKNOWN, ""
     end

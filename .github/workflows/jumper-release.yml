@@ -1,0 +1,70 @@
+# Builds and releases this fork's own images from a release branch.
+#
+# This file is intentionally NOT a modification of any upstream workflow:
+# it only calls build_test_deploy.yml, so `git merge upstream/master`
+# stays conflict-free forever.
+#
+# The branch name is the version. Pushing to 2026.08 builds
+# ghcr.io/jumper78/<image>:2026.08 plus a pinned 2026.08.<n>, where <n>
+# is derived from the tags that already exist.
+name: jumper-release
+
+on:
+  push:
+    branches:
+      - '2026.*'
+  workflow_dispatch:
+
+concurrency: jumper-release-${{ github.ref }}
+
+jobs:
+  derive-variables:
+    name: derive variables
+    runs-on: ubuntu-latest
+    outputs:
+      MAILU_VERSION: ${{ steps.derive.outputs.mailu_version }}
+      PINNED_MAILU_VERSION: ${{ steps.derive.outputs.pinned_mailu_version }}
+      BRANCH: ${{ steps.derive.outputs.branch }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # fetch-depth 0 is required to also retrieve all tags.
+          fetch-depth: 0
+      - name: Derive version from the branch name and the existing tags
+        id: derive
+        shell: bash
+        run: |
+          branch=${GITHUB_REF#refs/heads/}
+          latest=$(git tag --sort=version:refname --list "${branch}.*" | tail -1)
+          if [ -z "$latest" ]; then
+            pinned="${branch}.0"
+          else
+            pinned="${latest%.*}.$(( ${latest##*.} + 1 ))"
+          fi
+          echo "branch=$branch"               >> "$GITHUB_OUTPUT"
+          echo "mailu_version=$branch"        >> "$GITHUB_OUTPUT"
+          echo "pinned_mailu_version=$pinned" >> "$GITHUB_OUTPUT"
+          echo "Building $branch, pinned as $pinned (previous tag: ${latest:-none})"
+
+  build-test-deploy:
+    needs:
+      - derive-variables
+    # build_test_deploy.yml declares permissions on every job except deploy
+    # and tag-release, which inherit them from here. Granting them
+    # explicitly keeps this working regardless of the repository default.
+    permissions:
+      contents: write
+      packages: write
+    uses: ./.github/workflows/build_test_deploy.yml
+    with:
+      # Anything but this exact string skips the deploy or leaves it
+      # with no matching push step. See the deploy job's `if:` conditions.
+      architecture: 'linux/amd64,linux/arm64/v8,linux/arm/v7'
+      mailu_version: ${{ needs.derive-variables.outputs.MAILU_VERSION }}
+      pinned_mailu_version: ${{ needs.derive-variables.outputs.PINNED_MAILU_VERSION }}
+      # Must be lowercase: it is used verbatim as the docker tag prefix.
+      docker_org: ghcr.io/jumper78
+      branch: ${{ needs.derive-variables.outputs.BRANCH }}
+      deploy: 'true'
+      release: 'true'
+    secrets: inherit

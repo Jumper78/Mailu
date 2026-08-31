@@ -1,0 +1,1 @@
+Remove three Postfix TLS settings that have had no effect since server-side TLS moved to nginx in 2017: `tls_high_cipherlist`, `tls_preempt_cipherlist` and `smtpd_tls_session_cache_database`. Postfix's `smtpd` offers no TLS of its own, so none of the three is ever read. No behaviour changes.

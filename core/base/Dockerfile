@@ -54,6 +54,12 @@ ENV \
   LDFLAGS="-Wl,-z,noexecstack -Wl,-z,relro -Wl,-z,now" \
   SNUFFLEUPAGUS_URL="https://github.com/jvoisin/snuffleupagus/archive/refs/tags/v${SNUFFLEUPAGUS_VERSION}.tar.gz"
 
+# snuffleupagus' own Makefile invokes the unversioned "phpize", which alpine
+# only ships for whatever it currently considers the default php. That made the
+# build depend on a choice alpine can change under us: it broke on 3.23, where
+# php83 stopped being the default and php83-dev no longer provided the wrapper.
+# The two symlinks below pin the build to the php it is actually compiled for,
+# so the default no longer matters.
 RUN set -euxo pipefail \
   ;  machine="$(apk --print-arch)" \
   ; deps="build-base gcc libffi-dev python3-dev mariadb-dev" \
@@ -67,8 +73,10 @@ RUN set -euxo pipefail \
   ; curl -sL ${SNUFFLEUPAGUS_URL} | tar xz \
   ; cd snuffleupagus-${SNUFFLEUPAGUS_VERSION} \
   ; rm -rf src/tests/*php7*/ src/tests/*session*/ src/tests/broken_configuration/ src/tests/*cookie* src/tests/upload_validation/ \
-  ; apk add --virtual .build-deps php83-dev php83-cgi php83-simplexml php83-xml pcre-dev build-base php83-pear php83-openssl re2c \
-  ; pecl83 install vld-beta \
+  ; apk add --virtual .build-deps php84-dev php84-cgi php84-simplexml php84-xml pcre-dev build-base php84-pear php84-openssl re2c \
+  ; ln -sf /usr/bin/phpize84 /usr/bin/phpize \
+  ; ln -sf /usr/bin/php-config84 /usr/bin/php-config \
+  ; pecl84 install vld-beta \
   ; make -j $(grep -c processor /proc/cpuinfo) release \
   ; cp src/.libs/snuffleupagus.so /app \
   ; rm -rf /root/.cargo /tmp/*.pem /root/.cache
@@ -77,7 +85,7 @@ RUN set -euxo pipefail \
 FROM system
 
 COPY --from=build /app/venv/ /app/venv/
-COPY --chown=root:root --from=build /app/snuffleupagus.so /usr/lib/php83/modules/
+COPY --chown=root:root --from=build /app/snuffleupagus.so /usr/lib/php84/modules/
 
 ENV \
   VIRTUAL_ENV=/app/venv \

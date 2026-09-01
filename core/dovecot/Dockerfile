@@ -14,8 +14,11 @@ LABEL version=$VERSION
 # Which alpine releases were tried, and why the later ones were not taken - the
 # reasons are both in core/base, not in this image:
 #   3.22  dovecot 2.4.1, python 3.12  - in use
-#   3.23  dovecot 2.4.4, python 3.12  - base fails: snuffleupagus calls the
-#         unversioned "phpize", which php83-dev no longer provides there
+#   3.23  dovecot 2.4.4, python 3.12  - base used to fail here because
+#         snuffleupagus calls the unversioned "phpize", which php83-dev no
+#         longer provides on 3.23. core/base now pins phpize/php-config to the
+#         versioned wrappers, so that reason is gone -- but 3.23 has not been
+#         retried since, so this line is not yet an endorsement.
 #   3.24  dovecot 2.4.4, python 3.14  - base fails: the pinned cffi, greenlet
 #         and psycopg2-binary do not compile against cpython 3.14
 RUN set -euxo pipefail \

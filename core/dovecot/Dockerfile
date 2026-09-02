@@ -13,10 +13,12 @@ LABEL version=$VERSION
 #
 # Which alpine releases were tried, and why the later ones were not taken - the
 # reasons are both in core/base, not in this image:
-#   3.22  dovecot 2.4.1, python 3.12  - in use
-#   3.23  dovecot 2.4.4, python 3.12  - base fails: snuffleupagus calls the
-#         unversioned "phpize", which php83-dev no longer provides there
-#   3.24  dovecot 2.4.4, python 3.14  - base fails: the pinned cffi, greenlet
+#   3.22  dovecot 2.4.1, python 3.12  - previous base
+#   3.23  dovecot 2.4.4, python 3.12  - in use. core/base used to fail here
+#         because snuffleupagus calls the unversioned "phpize", which php83-dev
+#         does not provide on 3.23; pinning the build to phpize84/php-config84
+#         removed that dependency and all 14 images now build.
+#   3.24  dovecot 2.4.5, python 3.14  - base fails: the pinned cffi, greenlet
 #         and psycopg2-binary do not compile against cpython 3.14
 RUN set -euxo pipefail \
   ; apk add --no-cache dovecot dovecot-lua dovecot-lmtpd dovecot-pigeonhole-plugin dovecot-pop3d dovecot-submissiond rspamd-client dovecot-fts-flatcurve lua-json4 \

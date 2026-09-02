@@ -9,21 +9,45 @@ COPY snappymail/pubkey.asc /tmp/snappymail.asc
 COPY roundcube/pubkey.asc /tmp/roundcube.asc
 COPY roundcube/roundcube.diff /tmp/roundcube.diff
 
-# php83-pecl-imagick php83-pecl-uuid are missing
+# php84-pecl-imagick php84-pecl-uuid are missing
+#
+# alpine ships the unversioned /usr/bin/php only for whatever it currently
+# treats as the default php, and that moves every release: php83 on 3.22, php84
+# on 3.23, php85 already in edge (the _default_php flag in each php APKBUILD
+# says which). Under 3.22 that left no "php" on PATH at all, and roundcube's
+# bin/*.sh carry a "#!/usr/bin/env php" shebang -- the container came up but
+# every start ended in "env: can't execute 'php'". The symlink below pins it to
+# the php this image installs rather than to alpine's current pick; the php -v
+# check right after fails the build if it ever points at something other
+# than 8.4.
+#
+# PHP 8.4 moved pspell out of the core distribution, so roundcube spellchecks
+# through enchant now (config.inc.php sets spellcheck_engine accordingly).
+# enchant reads its dictionaries through a backend and reports none rather than
+# failing when no backend can serve them, so a broken pairing would ship as a
+# spellchecker that silently finds nothing. The php84 -r call below fails the
+# build in that case. It deliberately checks only that enchant sees any
+# dictionary at all: which languages are available follows from the aspell-*
+# packages above, and duplicating that list here would just be a second place
+# to forget. If it ever trips, those packages are what needs replacing --
+# alpine's enchant2 also carries a hunspell backend wanting hunspell-* instead.
 RUN set -euxo pipefail \
   ; apk add --no-cache \
     nginx gpg gpg-agent patch \
-    php83 php83-fpm php83-mbstring php83-zip php83-xml php83-simplexml php83-pecl-apcu \
-    php83-dom php83-curl php83-exif gd php83-gd php83-iconv php83-intl php83-openssl php83-ctype \
-    php83-pdo_sqlite php83-pdo_mysql php83-pdo_pgsql php83-pdo php83-sodium libsodium php83-tidy \
-    php83-pspell php83-opcache php83-session php83-sockets php83-fileinfo php83-xmlreader php83-xmlwriter \
+    php84 php84-fpm php84-mbstring php84-zip php84-xml php84-simplexml php84-pecl-apcu \
+    php84-dom php84-curl php84-exif gd php84-gd php84-iconv php84-intl php84-openssl php84-ctype \
+    php84-pdo_sqlite php84-pdo_mysql php84-pdo_pgsql php84-pdo php84-sodium libsodium php84-tidy \
+    php84-enchant enchant2 php84-opcache php84-session php84-sockets php84-fileinfo php84-xmlreader php84-xmlwriter \
     aspell-uk aspell-ru aspell-fr aspell-de aspell-en \
+  ; ln -sf /usr/bin/php84 /usr/bin/php \
+  ; php -v | head -1 | grep -q '^PHP 8\.4\.' \
+  ; php84 -r 'exit(enchant_broker_list_dicts(enchant_broker_init()) ? 0 : 1);' \
   ; rm /etc/nginx/http.d/default.conf \
-  ; rm /etc/php83/php-fpm.d/www.conf \
+  ; rm /etc/php84/php-fpm.d/www.conf \
   ; mkdir -m 700 /root/.gnupg/ \
   ; gpg --import /tmp/snappymail.asc \
   ; gpg --import /tmp/roundcube.asc \
-  ; echo extension=snuffleupagus > /etc/php83/conf.d/snuffleupagus.ini \
+  ; echo extension=snuffleupagus > /etc/php84/conf.d/snuffleupagus.ini \
   ; rm -f /tmp/roundcube.asc /tmp/snappymail.asc \
   ; mkdir -p /run/nginx /conf
 
@@ -84,7 +108,7 @@ RUN set -euxo pipefail \
 # common
 COPY start.py /
 COPY php.ini /defaults/
-COPY php-webmail.conf /etc/php83/php-fpm.d/
+COPY php-webmail.conf /etc/php84/php-fpm.d/
 COPY nginx-webmail.conf /conf/
 COPY snuffleupagus.rules /etc/snuffleupagus.rules.tpl
 

@@ -64,13 +64,41 @@ function auth_passdb_lookup(req)
       -- see auth_proxy_settings_parse() in src/lib-auth-client/auth-proxy.c.
       -- The error paths below still return a string, which is what 2.4
       -- expects whenever the result is not the success code.
-      return dovecot.auth.PASSDB_RESULT_OK, {
+      local reply = {
         proxy = "y",
         host = server,
         port = port,
         nopassword = "Y",
         proxy_noauth = "Y",
       }
+      -- A password with 8bit characters cannot go into an IMAP quoted string,
+      -- so imap_append_string() (src/lib-imap/imap-quote.c) falls back to a
+      -- literal - and to the *synchronizing* form "{17}", not "{17+}", even
+      -- though the backend advertises LITERAL+. The backend must therefore
+      -- answer "L LOGIN user {17}" with a "+ OK" continuation. At that moment
+      -- the connection is switching to the multiplex format, because the
+      -- front's ID command asked for it with "x-multiplex" "0": the backend
+      -- writes "* ID (...)", "* MULTIPLEX 0" and that "+ OK" as one unframed
+      -- block, and only the following segments are framed. imap_proxy_parse_line()
+      -- installs the multiplex istream the moment it reads "* MULTIPLEX 0",
+      -- so it reads the six bytes of "+ OK" as a frame header and loses the
+      -- stream. "L OK Logged in" never arrives, and the login dies in
+      -- login_proxy_timeout after 30s with
+      --   Login timed out in state=id+capability+login/banner
+      -- while the backend has long since logged the user in. Confirmed with
+      -- tcpdump against dovecot 2.4.5 (alpine 3.23); dovecot 2.4.1 (alpine
+      -- 3.22) was not affected, which is why this surfaced as a base image
+      -- regression in tests/compose/core/05_connectivity.py.
+      --
+      -- proxy_mech makes the front use AUTHENTICATE instead of LOGIN. The
+      -- backend advertises SASL-IR, so the credentials go inline as base64 -
+      -- pure ASCII, no literal, no continuation, nothing that can desync the
+      -- multiplex switch. Only imap is affected: pop3 and submission carry the
+      -- password as a plain command argument and keep working as they are.
+      if req.protocol == "imap" then
+        reply.proxy_mech = "PLAIN"
+      end
+      return dovecot.auth.PASSDB_RESULT_OK, reply
     else
       return dovecot.auth.PASSDB_RESULT_PASSWORD_MISMATCH, ""
     end

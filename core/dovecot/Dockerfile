@@ -14,7 +14,9 @@ LABEL version=$VERSION
 # Which alpine releases were tried, and why the later ones were not taken - the
 # reasons are both in core/base, not in this image:
 #   3.22  dovecot 2.4.1, python 3.12  - previous base
-#   3.23  dovecot 2.4.4, python 3.12  - in use. core/base used to fail here
+#   3.23  dovecot 2.4.5, python 3.12  - in use. The branch shipped 2.4.4 when
+#         this table was written and has since been bumped; 2.4.5 is what the
+#         image actually installs today. core/base used to fail here
 #         because snuffleupagus calls the unversioned "phpize", which php83-dev
 #         does not provide on 3.23; pinning the build to phpize84/php-config84
 #         removed that dependency and all 14 images now build.

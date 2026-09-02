@@ -12,11 +12,14 @@ COPY roundcube/roundcube.diff /tmp/roundcube.diff
 # php84-pecl-imagick php84-pecl-uuid are missing
 #
 # alpine ships the unversioned /usr/bin/php only for whatever it currently
-# treats as the default php, which on 3.22 is still php83 (aports#17215). With
-# php84 alone there is no "php" on PATH, and roundcube's bin/*.sh carry a
-# "#!/usr/bin/env php" shebang -- the container came up but every start ended in
-# "env: can't execute 'php'". The symlink below restores it; the php -v check
-# right after fails the build if it ever points at something other than 8.4.
+# treats as the default php, and that moves every release: php83 on 3.22, php84
+# on 3.23, php85 already in edge (the _default_php flag in each php APKBUILD
+# says which). Under 3.22 that left no "php" on PATH at all, and roundcube's
+# bin/*.sh carry a "#!/usr/bin/env php" shebang -- the container came up but
+# every start ended in "env: can't execute 'php'". The symlink below pins it to
+# the php this image installs rather than to alpine's current pick; the php -v
+# check right after fails the build if it ever points at something other
+# than 8.4.
 #
 # PHP 8.4 moved pspell out of the core distribution, so roundcube spellchecks
 # through enchant now (config.inc.php sets spellcheck_engine accordingly).

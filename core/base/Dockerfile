@@ -3,10 +3,10 @@
 # base system image (intermediate)
 # Note when updating the alpine tag, first manually run the workflow .github/workflows/mirror.yml.
 # Just run the workflow with the tag that must be synchronised.
-# This points at docker.io because ghcr.io/mailu/alpine:3.22.5 does not exist
+# This points at docker.io because ghcr.io/mailu/alpine:3.23.5 does not exist
 # yet - run the mirror workflow for this tag and change the line back before
 # merging.
-ARG DISTRO=docker.io/alpine:3.22.5
+ARG DISTRO=docker.io/alpine:3.23.5
 FROM $DISTRO as system
 
 ENV TZ=Etc/UTC LANG=C.UTF-8
@@ -55,11 +55,13 @@ ENV \
   SNUFFLEUPAGUS_URL="https://github.com/jvoisin/snuffleupagus/archive/refs/tags/v${SNUFFLEUPAGUS_VERSION}.tar.gz"
 
 # snuffleupagus' own Makefile invokes the unversioned "phpize", which alpine
-# only ships for whatever it currently considers the default php. That made the
-# build depend on a choice alpine can change under us: it broke on 3.23, where
-# php83 stopped being the default and php83-dev no longer provided the wrapper.
-# The two symlinks below pin the build to the php it is actually compiled for,
-# so the default no longer matters.
+# only ships for whatever it currently considers the default php -- a choice it
+# revisits every release: php83 on 3.22, php84 on 3.23, php85 already in edge.
+# That is what broke the build on 3.23, where php83-dev stopped providing the
+# wrapper. The two symlinks below pin the build to the php it is actually
+# compiled for, so the default no longer matters. They are a no-op on 3.23,
+# where php84 happens to be the default, and earn their keep again on the next
+# release.
 RUN set -euxo pipefail \
   ;  machine="$(apk --print-arch)" \
   ; deps="build-base gcc libffi-dev python3-dev mariadb-dev" \

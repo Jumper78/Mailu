@@ -71,30 +71,53 @@ function auth_passdb_lookup(req)
         nopassword = "Y",
         proxy_noauth = "Y",
       }
+      -- Authenticate to the backend with AUTHENTICATE rather than LOGIN.
+      --
       -- A password with 8bit characters cannot go into an IMAP quoted string,
       -- so imap_append_string() (src/lib-imap/imap-quote.c) falls back to a
-      -- literal - and to the *synchronizing* form "{17}", not "{17+}", even
-      -- though the backend advertises LITERAL+. The backend must therefore
-      -- answer "L LOGIN user {17}" with a "+ OK" continuation. At that moment
-      -- the connection is switching to the multiplex format, because the
-      -- front's ID command asked for it with "x-multiplex" "0": the backend
-      -- writes "* ID (...)", "* MULTIPLEX 0" and that "+ OK" as one unframed
-      -- block, and only the following segments are framed. imap_proxy_parse_line()
-      -- installs the multiplex istream the moment it reads "* MULTIPLEX 0",
-      -- so it reads the six bytes of "+ OK" as a frame header and loses the
-      -- stream. "L OK Logged in" never arrives, and the login dies in
-      -- login_proxy_timeout after 30s with
-      --   Login timed out in state=id+capability+login/banner
-      -- while the backend has long since logged the user in. Confirmed with
-      -- tcpdump against dovecot 2.4.5 (alpine 3.23); dovecot 2.4.1 (alpine
-      -- 3.22) was not affected, which is why this surfaced as a base image
-      -- regression in tests/compose/core/05_connectivity.py.
+      -- literal - and imap_append_literal() only ever writes the synchronizing
+      -- form "{17}", never "{17+}", even though the backend advertises
+      -- LITERAL+. dovecot then pipelines the octets without waiting for the
+      -- "+" continuation, which RFC 3501 4.3 and RFC 9051 4.3/7.6 forbid: "the
+      -- client MUST wait to receive a command continuation request ... before
+      -- sending the octet data". RFC 7888 would have permitted "{17+}" here,
+      -- and then no continuation would exist at all.
       --
-      -- proxy_mech makes the front use AUTHENTICATE instead of LOGIN. The
-      -- backend advertises SASL-IR, so the credentials go inline as base64 -
-      -- pure ASCII, no literal, no continuation, nothing that can desync the
-      -- multiplex switch. Only imap is affected: pop3 and submission carry the
-      -- password as a plain command argument and keep working as they are.
+      -- That stray continuation is what breaks the login. The front requests
+      -- multiplexing in its ID command ("x-multiplex" "0"), so the backend
+      -- answers "* MULTIPLEX 0" and switches to the framed format, which opens
+      -- with a 9 byte header (FF FF FF FF FF 00 02 03 FE, see
+      -- src/lib/iostream-multiplex-private.h). The "+ OK" however is written by
+      -- the IMAP parser to the ostream it captured at imap_parser_create()
+      -- time, and client_multiplex_output_start() swaps client->output without
+      -- re-pointing the parser - only imap_client_starttls() does that. So the
+      -- six bytes are emitted in front of the header instead of behind it
+      -- (tcpdump shows them in one unframed 46 byte block), the header never
+      -- parses, "L OK Logged in" never arrives, and the login dies after
+      -- login_proxy_timeout with
+      --   Login timed out in state=id+capability+login/banner (after 30 secs)
+      -- while the backend has long since logged the user in.
+      --
+      -- dovecot 2.4.1 (alpine 3.22) survived this by accident: its multiplex
+      -- ostream uncorked the parent on every send, so the header reached the
+      -- wire before the continuation was written and the stray line landed
+      -- inside the channel 0 data, where imap-proxy.c drops it on purpose
+      -- ("used literals with LOGIN command, just ignore"). 2.4.5 (alpine 3.23)
+      -- took that accident away with f415f9c59, which correctly gave the
+      -- multiplex ownership of the parent's cork. Nothing on this path has
+      -- changed in dovecot main since, so waiting it out is not an option.
+      --
+      -- proxy_mech removes the literal instead: AUTHENTICATE carries the
+      -- credentials base64-encoded and inline, because the backend advertises
+      -- SASL-IR. It is also the better path irrespective of the bug - RFC 9051
+      -- 6.2.3 says LOGIN "SHOULD NOT be used except as a last resort" while
+      -- 6.1.1 makes AUTH=PLAIN mandatory to implement, and dovecot implements
+      -- LOGIN as SASL PLAIN anyway (is_login_cmd_disabled() refuses LOGIN when
+      -- PLAIN is unavailable). Confidentiality is unchanged: base64 is not
+      -- encryption and this hop is exactly as exposed as it was before.
+      --
+      -- Only imap needs this. pop3 and submission pass the password as a plain
+      -- command argument, never build a literal, and are left alone.
       if req.protocol == "imap" then
         reply.proxy_mech = "PLAIN"
       end

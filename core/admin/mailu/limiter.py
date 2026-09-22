@@ -42,7 +42,11 @@ class LimitWraperFactory(object):
         return False if utils.is_exempt_from_ratelimits(ip) else not (self.storage.get(f'exempt-{ip}') > 0)
 
     def exempt_ip_from_ratelimits(self, ip):
-        self.storage.incr(f'exempt-{ip}', app.config["AUTH_RATELIMIT_EXEMPTION_LENGTH"], True)
+        # limits 4 dropped incr()'s elastic_expiry argument. Clearing the key
+        # first restarts its window, which is what the exemption wants: it
+        # slides forward on every successful authentication.
+        self.storage.clear(f'exempt-{ip}')
+        self.storage.incr(f'exempt-{ip}', app.config["AUTH_RATELIMIT_EXEMPTION_LENGTH"])
 
     def should_rate_limit_ip(self, ip):
         limiter = self.get_limiter(app.config["AUTH_RATELIMIT_IP"], 'auth-ip')
@@ -58,7 +62,7 @@ class LimitWraperFactory(object):
         if self.is_subject_to_rate_limits(ip):
             if username and self.storage.get(f'dedup-{client_network}-{username}') > 0:
                 return
-            self.storage.incr(f'dedup-{client_network}-{username}', limits.parse(app.config['AUTH_RATELIMIT_IP']).GRANULARITY.seconds, True)
+            self.storage.incr(f'dedup-{client_network}-{username}', limits.parse(app.config['AUTH_RATELIMIT_IP']).GRANULARITY.seconds)
             limiter.hit(client_network)
 
     def should_rate_limit_user(self, username, ip, device_cookie=None, device_cookie_name=None):
@@ -74,7 +78,7 @@ class LimitWraperFactory(object):
             truncated_password = hmac.new(bytearray(username, 'utf-8'), bytearray(password, 'utf-8'), 'sha256').hexdigest()[-6:]
             if password and (self.storage.get(f'dedup2-{username}-{truncated_password}') > 0):
                 return
-            self.storage.incr(f'dedup2-{username}-{truncated_password}', limits.parse(app.config['AUTH_RATELIMIT_USER']).GRANULARITY.seconds, True)
+            self.storage.incr(f'dedup2-{username}-{truncated_password}', limits.parse(app.config['AUTH_RATELIMIT_USER']).GRANULARITY.seconds)
             limiter.hit(device_cookie if device_cookie_name == username else username)
             self.rate_limit_ip(ip, username)
 

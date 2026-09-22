@@ -68,10 +68,9 @@ RUN set -euxo pipefail \
   ; curl -sL ${SNUFFLEUPAGUS_URL} | tar xz \
   ; cd snuffleupagus-${SNUFFLEUPAGUS_VERSION} \
   ; rm -rf src/tests/*php7*/ src/tests/*session*/ src/tests/broken_configuration/ src/tests/*cookie* src/tests/upload_validation/ \
-  ; apk add --virtual .build-deps php85-dev php85-cgi php85-simplexml php85-xml pcre-dev build-base php85-pear php85-openssl re2c \
+  ; apk add --virtual .build-deps php85-dev php85-cgi php85-simplexml php85-xml pcre-dev build-base php85-openssl re2c \
   ; ln -sf /usr/bin/phpize85 /usr/bin/phpize \
   ; ln -sf /usr/bin/php-config85 /usr/bin/php-config \
-  ; pecl85 install vld-beta \
   ; make -j $(grep -c processor /proc/cpuinfo) release \
   ; cp src/.libs/snuffleupagus.so /app \
   ; rm -rf /root/.cargo /tmp/*.pem /root/.cache

@@ -45,3 +45,14 @@
          'file_uploads'            => true,
          'session.auto_start'      => false,
          'zlib.output_compression' => false,
+--- program/lib/Roundcube/rcube_db.php
++++ program/lib/Roundcube/rcube_db.php
+@@ -919,7 +919,7 @@
+ 
+             $type = $map[$type] ?? PDO::PARAM_STR;
+ 
+-            return strtr($this->dbh->quote($input, $type),
++            return strtr($this->dbh->quote((string) $input, $type),
+                 // escape ? and `
+                 ['?' => '??', self::DEFAULT_QUOTE => self::DEFAULT_QUOTE.self::DEFAULT_QUOTE]
+             );

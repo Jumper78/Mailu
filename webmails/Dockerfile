@@ -11,13 +11,9 @@ COPY roundcube/roundcube.diff /tmp/roundcube.diff
 
 # php84-pecl-imagick php84-pecl-uuid are missing
 #
-# alpine ships the unversioned /usr/bin/php only for its default php, and that
-# moves every release. roundcube's bin/*.sh need it, so pin it to the php this
-# image installs; the php -v check below fails the build if it ever drifts.
-#
-# PHP 8.4 dropped pspell, so roundcube spellchecks through enchant. enchant
-# reports "no dictionaries" rather than failing, so a bad aspell-*/backend
-# pairing would ship silently -- the php84 -r call below fails the build first.
+# roundcube's bin/*.sh need an unversioned /usr/bin/php, which alpine ships
+# only for its current default. And enchant reports "no dictionaries" rather
+# than failing, so the check below catches a bad aspell-*/backend pairing.
 RUN set -euxo pipefail \
   ; apk add --no-cache \
     nginx gpg gpg-agent patch \

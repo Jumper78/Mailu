@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile-upstream:1.4.3
 
-FROM node:21-alpine3.18
+FROM node:24-alpine3.24
 
 WORKDIR /work
 

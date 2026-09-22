@@ -28,7 +28,17 @@ module.exports = {
             },
             {
                 test: /\.s?css$/i,
-                use: [css.loader, 'css-loader', 'sass-loader'],
+                use: [css.loader, 'css-loader', {
+                    loader: 'sass-loader',
+                    // admin-lte and the bootstrap it bundles are written
+                    // against sass syntax that later dart-sass drops. Nothing
+                    // in this repository can fix that, and the entry point is
+                    // itself in node_modules, so quietDeps does not cover it.
+                    options: { sassOptions: { silenceDeprecations: [
+                        'import', 'slash-div', 'color-functions', 'global-builtin',
+                        'abs-percent', 'if-function',
+                    ] } },
+                }],
             },
             {
                 test: /\.less$/i,

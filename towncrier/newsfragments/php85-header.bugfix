@@ -1,0 +1,1 @@
+Fix webmail login failing with "An internal error has occurred" on PHP 8.5. The roundcube and SnappyMail SSO plugins passed the HTTP status code as `header()`'s second argument, which is `bool $replace` rather than the status code. PHP accepted the implicit conversion until 8.4 and raises a `TypeError` from 8.5 on, so the authenticate hook aborted before the session was created.

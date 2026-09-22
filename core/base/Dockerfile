@@ -28,7 +28,7 @@ CMD /bin/bash
 FROM system as build
 
 ARG MAILU_DEPS=prod
-ARG SNUFFLEUPAGUS_VERSION=0.12.0
+ARG SNUFFLEUPAGUS_VERSION=0.14.0
 
 ENV VIRTUAL_ENV=/app/venv
 
@@ -68,10 +68,10 @@ RUN set -euxo pipefail \
   ; curl -sL ${SNUFFLEUPAGUS_URL} | tar xz \
   ; cd snuffleupagus-${SNUFFLEUPAGUS_VERSION} \
   ; rm -rf src/tests/*php7*/ src/tests/*session*/ src/tests/broken_configuration/ src/tests/*cookie* src/tests/upload_validation/ \
-  ; apk add --virtual .build-deps php84-dev php84-cgi php84-simplexml php84-xml pcre-dev build-base php84-pear php84-openssl re2c \
-  ; ln -sf /usr/bin/phpize84 /usr/bin/phpize \
-  ; ln -sf /usr/bin/php-config84 /usr/bin/php-config \
-  ; pecl84 install vld-beta \
+  ; apk add --virtual .build-deps php85-dev php85-cgi php85-simplexml php85-xml pcre-dev build-base php85-pear php85-openssl re2c \
+  ; ln -sf /usr/bin/phpize85 /usr/bin/phpize \
+  ; ln -sf /usr/bin/php-config85 /usr/bin/php-config \
+  ; pecl85 install vld-beta \
   ; make -j $(grep -c processor /proc/cpuinfo) release \
   ; cp src/.libs/snuffleupagus.so /app \
   ; rm -rf /root/.cargo /tmp/*.pem /root/.cache
@@ -80,7 +80,7 @@ RUN set -euxo pipefail \
 FROM system
 
 COPY --from=build /app/venv/ /app/venv/
-COPY --chown=root:root --from=build /app/snuffleupagus.so /usr/lib/php84/modules/
+COPY --chown=root:root --from=build /app/snuffleupagus.so /usr/lib/php85/modules/
 
 ENV \
   VIRTUAL_ENV=/app/venv \

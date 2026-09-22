@@ -9,7 +9,7 @@ COPY snappymail/pubkey.asc /tmp/snappymail.asc
 COPY roundcube/pubkey.asc /tmp/roundcube.asc
 COPY roundcube/roundcube.diff /tmp/roundcube.diff
 
-# php84-pecl-imagick php84-pecl-uuid are missing
+# php85-pecl-imagick php85-pecl-uuid are missing
 #
 # roundcube's bin/*.sh need an unversioned /usr/bin/php, which alpine ships
 # only for its current default. And enchant reports "no dictionaries" rather
@@ -17,20 +17,20 @@ COPY roundcube/roundcube.diff /tmp/roundcube.diff
 RUN set -euxo pipefail \
   ; apk add --no-cache \
     nginx gpg gpg-agent patch \
-    php84 php84-fpm php84-mbstring php84-zip php84-xml php84-simplexml php84-pecl-apcu \
-    php84-dom php84-curl php84-exif gd php84-gd php84-iconv php84-intl php84-openssl php84-ctype \
-    php84-pdo_sqlite php84-pdo_mysql php84-pdo_pgsql php84-pdo php84-sodium libsodium php84-tidy \
-    php84-enchant enchant2 php84-opcache php84-session php84-sockets php84-fileinfo php84-xmlreader php84-xmlwriter \
+    php85 php85-fpm php85-mbstring php85-zip php85-xml php85-simplexml php85-pecl-apcu \
+    php85-dom php85-curl php85-exif gd php85-gd php85-iconv php85-intl php85-openssl php85-ctype \
+    php85-pdo_sqlite php85-pdo_mysql php85-pdo_pgsql php85-pdo php85-sodium libsodium php85-tidy \
+    php85-enchant enchant2 php85-opcache php85-session php85-sockets php85-fileinfo php85-xmlreader php85-xmlwriter \
     aspell-uk aspell-ru aspell-fr aspell-de aspell-en \
-  ; ln -sf /usr/bin/php84 /usr/bin/php \
-  ; php -v | head -1 | grep -q '^PHP 8\.4\.' \
-  ; php84 -r 'exit(enchant_broker_list_dicts(enchant_broker_init()) ? 0 : 1);' \
+  ; ln -sf /usr/bin/php85 /usr/bin/php \
+  ; php -v | head -1 | grep -q '^PHP 8\.5\.' \
+  ; php85 -r 'exit(enchant_broker_list_dicts(enchant_broker_init()) ? 0 : 1);' \
   ; rm /etc/nginx/http.d/default.conf \
-  ; rm /etc/php84/php-fpm.d/www.conf \
+  ; rm /etc/php85/php-fpm.d/www.conf \
   ; mkdir -m 700 /root/.gnupg/ \
   ; gpg --import /tmp/snappymail.asc \
   ; gpg --import /tmp/roundcube.asc \
-  ; echo extension=snuffleupagus > /etc/php84/conf.d/snuffleupagus.ini \
+  ; echo extension=snuffleupagus > /etc/php85/conf.d/snuffleupagus.ini \
   ; rm -f /tmp/roundcube.asc /tmp/snappymail.asc \
   ; mkdir -p /run/nginx /conf
 
@@ -91,7 +91,7 @@ RUN set -euxo pipefail \
 # common
 COPY start.py /
 COPY php.ini /defaults/
-COPY php-webmail.conf /etc/php84/php-fpm.d/
+COPY php-webmail.conf /etc/php85/php-fpm.d/
 COPY nginx-webmail.conf /conf/
 COPY snuffleupagus.rules /etc/snuffleupagus.rules.tpl
 

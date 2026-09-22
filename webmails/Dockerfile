@@ -11,26 +11,13 @@ COPY roundcube/roundcube.diff /tmp/roundcube.diff
 
 # php84-pecl-imagick php84-pecl-uuid are missing
 #
-# alpine ships the unversioned /usr/bin/php only for whatever it currently
-# treats as the default php, and that moves every release: php83 on 3.22, php84
-# on 3.23, php85 already in edge (the _default_php flag in each php APKBUILD
-# says which). Under 3.22 that left no "php" on PATH at all, and roundcube's
-# bin/*.sh carry a "#!/usr/bin/env php" shebang -- the container came up but
-# every start ended in "env: can't execute 'php'". The symlink below pins it to
-# the php this image installs rather than to alpine's current pick; the php -v
-# check right after fails the build if it ever points at something other
-# than 8.4.
+# alpine ships the unversioned /usr/bin/php only for its default php, and that
+# moves every release. roundcube's bin/*.sh need it, so pin it to the php this
+# image installs; the php -v check below fails the build if it ever drifts.
 #
-# PHP 8.4 moved pspell out of the core distribution, so roundcube spellchecks
-# through enchant now (config.inc.php sets spellcheck_engine accordingly).
-# enchant reads its dictionaries through a backend and reports none rather than
-# failing when no backend can serve them, so a broken pairing would ship as a
-# spellchecker that silently finds nothing. The php84 -r call below fails the
-# build in that case. It deliberately checks only that enchant sees any
-# dictionary at all: which languages are available follows from the aspell-*
-# packages above, and duplicating that list here would just be a second place
-# to forget. If it ever trips, those packages are what needs replacing --
-# alpine's enchant2 also carries a hunspell backend wanting hunspell-* instead.
+# PHP 8.4 dropped pspell, so roundcube spellchecks through enchant. enchant
+# reports "no dictionaries" rather than failing, so a bad aspell-*/backend
+# pairing would ship silently -- the php84 -r call below fails the build first.
 RUN set -euxo pipefail \
   ; apk add --no-cache \
     nginx gpg gpg-agent patch \

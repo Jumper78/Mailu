@@ -9,8 +9,6 @@ COPY snappymail/pubkey.asc /tmp/snappymail.asc
 COPY roundcube/pubkey.asc /tmp/roundcube.asc
 COPY roundcube/roundcube.diff /tmp/roundcube.diff
 
-# php84-pecl-imagick php84-pecl-uuid are missing
-#
 # roundcube's bin/*.sh need an unversioned /usr/bin/php, which alpine ships
 # only for its current default. And enchant reports "no dictionaries" rather
 # than failing, so the check below catches a bad aspell-*/backend pairing.

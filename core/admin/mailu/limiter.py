@@ -42,9 +42,8 @@ class LimitWraperFactory(object):
         return False if utils.is_exempt_from_ratelimits(ip) else not (self.storage.get(f'exempt-{ip}') > 0)
 
     def exempt_ip_from_ratelimits(self, ip):
-        # limits 4 dropped incr()'s elastic_expiry argument. Clearing the key
-        # first restarts its window, which is what the exemption wants: it
-        # slides forward on every successful authentication.
+        # Clearing the key first restarts its window: the exemption slides
+        # forward on every successful authentication.
         self.storage.clear(f'exempt-{ip}')
         self.storage.incr(f'exempt-{ip}', app.config["AUTH_RATELIMIT_EXEMPTION_LENGTH"])
 

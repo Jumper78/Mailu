@@ -34,9 +34,8 @@ for script_file in glob.glob("/conf/*.script"):
 os.system("chown mail:mail /mail")
 os.system("chown -R mail:mail /var/lib/dovecot /conf")
 
-# python 3.14 made forkserver the default on linux, which re-imports this
-# module in the child and re-runs everything above. start_podop expects the
-# fork semantics it was written for.
+# forkserver, the default on linux, re-imports this module in the child and
+# re-runs everything above. start_podop needs fork semantics.
 multiprocessing.set_start_method('fork')
 multiprocessing.Process(target=start_podop).start()
 cmd = ['/usr/sbin/dovecot', '-c', '/etc/dovecot/dovecot.conf', '-F']

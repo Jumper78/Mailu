@@ -9,8 +9,6 @@ COPY snappymail/pubkey.asc /tmp/snappymail.asc
 COPY roundcube/pubkey.asc /tmp/roundcube.asc
 COPY roundcube/roundcube.diff /tmp/roundcube.diff
 
-# php85-pecl-imagick php85-pecl-uuid are missing
-#
 # roundcube's bin/*.sh need an unversioned /usr/bin/php, which alpine ships
 # only for its current default. And enchant reports "no dictionaries" rather
 # than failing, so the check below catches a bad aspell-*/backend pairing.
@@ -20,7 +18,7 @@ RUN set -euxo pipefail \
     php85 php85-fpm php85-mbstring php85-zip php85-xml php85-simplexml php85-pecl-apcu \
     php85-dom php85-curl php85-exif gd php85-gd php85-iconv php85-intl php85-openssl php85-ctype \
     php85-pdo_sqlite php85-pdo_mysql php85-pdo_pgsql php85-pdo php85-sodium libsodium php85-tidy \
-    php85-enchant enchant2 php85-opcache php85-session php85-sockets php85-fileinfo php85-xmlreader php85-xmlwriter \
+    php85-enchant enchant2 php85-session php85-sockets php85-fileinfo php85-xmlreader php85-xmlwriter \
     aspell-uk aspell-ru aspell-fr aspell-de aspell-en \
   ; ln -sf /usr/bin/php85 /usr/bin/php \
   ; php -v | head -1 | grep -q '^PHP 8\.5\.' \

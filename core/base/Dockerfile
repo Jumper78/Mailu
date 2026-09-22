@@ -51,12 +51,8 @@ ENV \
   LDFLAGS="-Wl,-z,noexecstack -Wl,-z,relro -Wl,-z,now" \
   SNUFFLEUPAGUS_URL="https://github.com/jvoisin/snuffleupagus/archive/refs/tags/v${SNUFFLEUPAGUS_VERSION}.tar.gz"
 
-# snuffleupagus' own Makefile invokes the unversioned "phpize", which alpine
-# only ships for whatever it currently considers the default php. That made the
-# build depend on a choice alpine can change under us: it broke on 3.23, where
-# php83 stopped being the default and php83-dev no longer provided the wrapper.
-# The two symlinks below pin the build to the php it is actually compiled for,
-# so the default no longer matters.
+# snuffleupagus' Makefile calls the unversioned "phpize", which alpine ships
+# only for its current default php. Pin both wrappers to the php it builds for.
 RUN set -euxo pipefail \
   ;  machine="$(apk --print-arch)" \
   ; deps="build-base gcc libffi-dev python3-dev mariadb-dev" \

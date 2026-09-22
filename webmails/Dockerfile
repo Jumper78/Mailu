@@ -11,23 +11,12 @@ COPY roundcube/roundcube.diff /tmp/roundcube.diff
 
 # php84-pecl-imagick php84-pecl-uuid are missing
 #
-# alpine ships the unversioned /usr/bin/php only for whatever it currently
-# treats as the default php, which on 3.22 is still php83 (aports#17215). With
-# php84 alone there is no "php" on PATH, and roundcube's bin/*.sh carry a
-# "#!/usr/bin/env php" shebang -- the container came up but every start ended in
-# "env: can't execute 'php'". The symlink below restores it; the php -v check
-# right after fails the build if it ever points at something other than 8.4.
+# alpine ships the unversioned /usr/bin/php only for its default php (php83 on
+# 3.22), but roundcube's bin/*.sh need it. The php -v check below guards it.
 #
-# PHP 8.4 moved pspell out of the core distribution, so roundcube spellchecks
-# through enchant now (config.inc.php sets spellcheck_engine accordingly).
-# enchant reads its dictionaries through a backend and reports none rather than
-# failing when no backend can serve them, so a broken pairing would ship as a
-# spellchecker that silently finds nothing. The php84 -r call below fails the
-# build in that case. It deliberately checks only that enchant sees any
-# dictionary at all: which languages are available follows from the aspell-*
-# packages above, and duplicating that list here would just be a second place
-# to forget. If it ever trips, those packages are what needs replacing --
-# alpine's enchant2 also carries a hunspell backend wanting hunspell-* instead.
+# PHP 8.4 dropped pspell, so roundcube spellchecks through enchant. enchant
+# reports "no dictionaries" rather than failing, so a bad aspell-*/backend
+# pairing would ship silently -- the php84 -r call below fails the build first.
 RUN set -euxo pipefail \
   ; apk add --no-cache \
     nginx gpg gpg-agent patch \

@@ -13,16 +13,15 @@ RUN set -euxo pipefail \
 
 # TEMPORARY PATCH -- remove this comment and the RUN block below, nothing else.
 #
-# Where rspamd is built against PUC-Rio Lua rather than LuaJIT, dmarc.lua hands
-# the fractional double from task:get_date() to os.date(), which Lua 5.3+
-# rejects. The exception aborts the DNS callback before any report data reaches
-# redis, so DMARC reporting silently collects nothing while policy evaluation
-# keeps working.
+# Alpine builds rspamd against PUC-Rio Lua 5.4 instead of LuaJIT on some
+# architectures -- on 3.23 that is armv7, which Mailu publishes. dmarc.lua
+# hands the fractional double from task:get_date() to os.date(); LuaJIT truncated
+# it, Lua 5.3+ rejects it. The exception aborts the DNS callback before any report
+# data reaches redis, so DMARC reporting silently collects nothing. Policy
+# evaluation is unaffected -- the symbols are inserted earlier in the function.
 #
-# Fixed in rspamd 4.1.0; no alpine release carries it yet (3.23 ships 3.14.0,
-# 3.24 ships 4.0.1). Alpine chooses luajit per architecture, and on 3.23 armv7
-# is on the non-luajit list -- an architecture Mailu publishes, so this is not
-# insurance.
+# Fixed in rspamd 4.1.0; alpine 3.23 ships 3.14.0 and 3.24 ships 4.0.1:
+# https://github.com/rspamd/rspamd/blob/master/src/plugins/lua/dmarc.lua
 #
 # HOW THIS ENDS: the build fails as soon as the packaged dmarc.lua already
 # carries the fix. When that happens, delete this comment and the RUN block --

@@ -53,15 +53,6 @@ function auth_passdb_lookup(req)
         nopassword = "Y",
         proxy_noauth = "Y",
       }
-      -- Authenticate to the backend with AUTHENTICATE rather than LOGIN.
-      -- A password with 8bit characters forces LOGIN to send the credentials
-      -- as an IMAP literal, and proxying that deadlocks on dovecot 2.4.5: the
-      -- "+" continuation is written ahead of the multiplex header, so the
-      -- backend's reply never parses and the login times out. AUTHENTICATE
-      -- carries them inline instead -- the backend advertises SASL-IR -- and
-      -- RFC 9051 6.2.3 prefers it anyway, LOGIN "SHOULD NOT be used except as
-      -- a last resort". Only imap builds literals; pop3 and submission pass
-      -- the password as a command argument and are left alone.
       if req.protocol == "imap" then
         reply.proxy_mech = "PLAIN"
       end

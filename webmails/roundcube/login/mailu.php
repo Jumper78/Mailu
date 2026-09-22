@@ -47,7 +47,7 @@ class mailu extends rcube_plugin
         header('HTTP/1.0 403 Forbidden');
         print('mailu sso failure');
       } else {
-        header('Location: sso.php', 302);
+        header('Location: sso.php', true, 302);
       }
       exit();
     }
@@ -72,13 +72,13 @@ class mailu extends rcube_plugin
 
   function login($args)
   {
-    header('Location: index.php', 302);
+    header('Location: index.php', true, 302);
     exit();
   }
 
   function login_failed($args)
   {
-    header('Location: sso.php', 302);
+    header('Location: sso.php', true, 302);
     exit();
   }
 

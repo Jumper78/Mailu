@@ -3,9 +3,8 @@
 # base system image (intermediate)
 # Note when updating the alpine tag, first manually run the workflow .github/workflows/mirror.yml.
 # Just run the workflow with the tag that must be synchronised.
-# docker.io until the mirror workflow has run for this tag.
-ARG DISTRO=docker.io/alpine:3.24.1
-FROM $DISTRO as system
+ARG DISTRO=ghcr.io/mailu/alpine:3.24.1
+FROM $DISTRO AS system
 
 ENV TZ=Etc/UTC LANG=C.UTF-8
 
@@ -21,11 +20,11 @@ RUN set -euxo pipefail \
 
 WORKDIR /app
 
-CMD /bin/bash
+CMD ["/bin/bash"]
 
 
 # build virtual env (intermediate)
-FROM system as build
+FROM system AS build
 
 ARG MAILU_DEPS=prod
 ARG SNUFFLEUPAGUS_VERSION=0.14.0

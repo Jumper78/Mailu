@@ -57,12 +57,6 @@ def autoconfig_microsoft():
     hostname = escape(app.config["HOSTNAME"])
 
     try:
-<<<<<<< HEAD
-        xmlRequest = (flask.request.data).decode("utf-8")
-        xml = xmltodict.parse(xmlRequest[xmlRequest.find('<'):xmlRequest.rfind('>')+1])
-        schema = xml['Autodiscover']['Request']['AcceptableResponseSchema']
-        if not schema.startswith('http://schemas.microsoft.com/exchange/autodiscover/outlook/responseschema/2006'):
-=======
         root = ET.fromstring(flask.request.data)
 
         # Autodiscover requests normally use this namespace, so strip
@@ -90,7 +84,6 @@ def autoconfig_microsoft():
             "http://schemas.microsoft.com/exchange/autodiscover/"
             "outlook/responseschema/2006"
         ):
->>>>>>> upstream-master
             return flask.abort(404)
 
         schema = quoteattr(schema)

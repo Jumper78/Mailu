@@ -537,7 +537,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target: ["setup", "docs", "fetchmail", "webmail", "admin", "radicale", "rspamd", "oletools", "postfix", "dovecot", "unbound", "nginx"]
+        target: ["setup", "docs", "fetchmail", "webmail", "admin", "traefik-certdumper", "radicale", "rspamd", "oletools", "postfix", "dovecot", "unbound", "nginx"]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

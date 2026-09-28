@@ -174,6 +174,13 @@ Both ``SITENAME`` and ``WEBSITE`` are customization options for the panel menu
 in the admin interface, while ``SITENAME`` is a customization option for
 every Web interface.
 
+``WEBSITE_NAME`` (default: unset) replaces the label of that menu entry, which
+otherwise reads "Website" in the language of the interface. Use it only when the
+entry should point at something other than your website -- an imprint or a
+contact page, say -- because there is a single such entry and renaming it means
+you no longer link your website. A value set here is shown as-is and is not
+translated, so pick a label your users understand.
+
 - ``LOGO_BACKGROUND`` sets a custom background colour for the brand logo
   in the top-left of the main admin interface.
   For a list of colour codes refer to this page of `w3schools`_.

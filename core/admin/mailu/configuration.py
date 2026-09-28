@@ -71,6 +71,7 @@ DEFAULT_CONFIG = {
     # Web settings
     'SITENAME': 'Mailu',
     'WEBSITE': 'https://mailu.io',
+    'WEBSITE_NAME': None,
     'ADMIN': 'none',
     'WEBMAIL_AVAILABLE': 'roundcube,snappymail',
     'RECAPTCHA_PUBLIC_KEY': '',

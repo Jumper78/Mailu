@@ -456,15 +456,18 @@ This can be achieved by an nginx override, e.g. `overrides/nginx/contact.conf`
     add_header Content-Type text/html;
   }
 
-and overriding the website link in `mailu.env`
+and pointing the menu entry at it in `mailu.env`
 
 .. code-block:: bash
 
-  # Website name
-  SITENAME="Kontaktdaten"
-
   # Linked Website URL
   WEBSITE=https://<domain>/contact
+
+  # Label shown for that entry instead of the translated "Website"
+  WEBSITE_NAME=Kontaktdaten
+
+.. note:: There is only one such menu entry, so renaming it means you no longer
+  link your own website. ``WEBSITE_NAME`` is shown as-is and is not translated.
 
 
 .. _`3957`: https://github.com/Mailu/Mailu/issues/3957

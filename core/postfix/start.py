@@ -8,7 +8,7 @@ import sys
 from socrate import system, conf, supervisor
 from chroot import prepare_postfix_chroot
 
-log_filters = [
+env = system.set_env(log_filters=[
     rb'(dis)?connect from localhost\[(\:\:1|127\.0\.0\.1)\]( quit=1 commands=1)?$',
     rb'haproxy read\: short protocol header\: QUIT$',
     rb'discarding EHLO keywords\: PIPELINING$',
@@ -31,6 +31,8 @@ if 'RELAYNETS' in os.environ:
             addr = f'[{addr}]'
         relaynets.append(addr + sep + prefix)
     os.environ["RELAYNETS"] = ','.join(relaynets)
+
+context = dict(os.environ, DEFER_ON_TLS_ERROR=env.get('DEFER_ON_TLS_ERROR', True))
 
 context = dict(os.environ, DEFER_ON_TLS_ERROR=env.get('DEFER_ON_TLS_ERROR', True))
 
@@ -77,6 +79,7 @@ if sasl_passwd:
 # Configure logrotate
 if os.environ.get('POSTFIX_LOG_FILE'):
     conf.jinja("/conf/logrotate.conf", context, "/etc/logrotate.d/postfix.conf")
+    os.system("/usr/sbin/crond")
     if os.path.exists("/overrides/logrotate.conf"):
         shutil.copyfile("/overrides/logrotate.conf", "/etc/logrotate.d/postfix.conf")
 

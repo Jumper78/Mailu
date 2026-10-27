@@ -209,7 +209,7 @@ jobs:
       fail-fast: false
       matrix:
         target: ["base", "assets"]
-    runs-on: self-hosted
+    runs-on: ubuntu-26.04-arm
     permissions:
      contents: read
      packages: write
@@ -362,7 +362,7 @@ jobs:
       fail-fast: false
       matrix:
         target: ${{ fromJson(needs.targets.outputs.matrix) }}
-    runs-on: self-hosted
+    runs-on: ubuntu-26.04-arm
     permissions:
      contents: read
      packages: write
@@ -539,7 +539,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target: ["setup", "docs", "fetchmail", "webmail", "admin", "radicale", "rspamd", "oletools", "postfix", "dovecot", "unbound", "nginx"]
+        target: ["setup", "docs", "fetchmail", "webmail", "admin", "traefik-certdumper", "radicale", "rspamd", "oletools", "postfix", "dovecot", "unbound", "nginx"]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

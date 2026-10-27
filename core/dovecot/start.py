@@ -5,7 +5,7 @@ import glob
 
 from socrate import system, conf, supervisor
 
-env = system.set_env(log_filters=[
+log_filters = [
     rb'Error\: SSL context initialization failed, disabling SSL\: Couldn\'t initialize SSL server context\: Can\'t load SSL certificate \(ssl_server_cert_file setting\)\: The certificate is empty$',
 ]
 env = system.set_env()

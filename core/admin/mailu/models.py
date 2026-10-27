@@ -3,9 +3,11 @@
 
 import os
 import json
+import base64
+import hashlib
 
-from datetime import date
-from email.mime import text
+from datetime import date, datetime, timezone
+from email.mime import text, multipart
 from itertools import chain
 
 import flask_sqlalchemy
@@ -25,7 +27,7 @@ from sqlalchemy.ext import declarative
 from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.inspection import inspect
 from sqlalchemy.orm.attributes import flag_modified
-from sqlalchemy import event
+from sqlalchemy.orm import validates
 from werkzeug.utils import cached_property
 
 from mailu import dkim, utils
@@ -172,12 +174,6 @@ class Config(Base):
     value = db.Column(JSONEncoded)
 
 
-def _save_dkim_keys(session):
-    """ store DKIM keys after commit """
-    for obj in session.identity_map.values():
-        if isinstance(obj, Domain):
-            obj.save_dkim_key()
-
 def _get_managers():
     return managers
 
@@ -198,26 +194,39 @@ class Domain(Base):
     # Anonymous Email Service integration: enable domain to accept API-generated aliases
     anonmail_enabled = db.Column(db.Boolean, nullable=False, default=False)
 
-    _dkim_key = None
-    _dkim_key_on_disk = None
+    dkim_keys = db.relationship('DkimKey', back_populates='domain', cascade='all, delete-orphan', order_by='DkimKey.selector')
 
-    def _dkim_file(self):
-        """ return filename for active DKIM key """
-        return app.config['DKIM_PATH'].format(
-            domain=self.name,
-            selector=app.config['DKIM_SELECTOR']
-        )
+    # WebAuthn passkey policy
+    passkey_require_enrollment = db.Column(db.Boolean, nullable=False, default=False)
+    passkey_enforce_aaguid = db.Column(db.Boolean, nullable=False, default=False)
+    passkey_aaguid_mode = db.Column(db.String(8), nullable=False, default='allow')
+    passkey_aaguids = db.Column(db.Text, nullable=False, default='')
+    passkey_require_uv = db.Column(db.Boolean, nullable=False, default=True)
+    passkey_backup_eligible_policy = db.Column(db.String(8), nullable=False, default='optional')
+    passkey_backup_state_policy = db.Column(db.String(8), nullable=False, default='optional')
+    passkey_require_sign_count_increase = db.Column(db.Boolean, nullable=False, default=False)
+    passkey_attestation_policy = db.Column(db.String(8), nullable=False, default='optional')
+    passkey_device_bound = db.Column(db.Boolean, nullable=False, default=False)
+    passkey_resident_key = db.Column(db.String(16), nullable=False, default='preferred')
 
-    def save_dkim_key(self):
-        """ save changed DKIM key to disk """
-        if self._dkim_key != self._dkim_key_on_disk:
-            file_path = self._dkim_file()
-            if self._dkim_key:
-                with open(file_path, 'wb') as handle:
-                    handle.write(self._dkim_key)
-            elif os.path.exists(file_path):
-                os.unlink(file_path)
-            self._dkim_key_on_disk = self._dkim_key
+    def _import_legacy_dkim_key(self):
+        """Import the historical filesystem key once, preserving its old selector."""
+        path = app.config['DKIM_PATH'].format(domain=self.name, selector=app.config['DKIM_SELECTOR'])
+        backup_path = f'{path}.bak'
+        if os.path.exists(backup_path):
+            return
+        try:
+            with open(path, 'rb') as key_file:
+                key = key_file.read()
+        except OSError:
+            return
+
+        selector = app.config['DKIM_SELECTOR']
+        if not any(existing.selector == selector for existing in self.dkim_keys):
+            self.dkim_keys.append(DkimKey(private_key=key, algorithm='rsa', active=not any(k.active for k in self.dkim_keys),
+                selector=selector))
+        db.session.commit()
+        os.replace(path, backup_path)
 
     @cached_property
     def dns_mx(self):
@@ -234,9 +243,8 @@ class Domain(Base):
     @property
     def dns_dkim(self):
         """ return DKIM record for domain """
-        if self.dkim_key:
-            selector = app.config['DKIM_SELECTOR']
-            return f'{selector}._domainkey.{idna.encode(self.name.lower()).decode('ascii')}. 600 IN TXT "v=DKIM1; k=rsa; p={self.dkim_publickey}"'
+        if self.dkim_keys:
+            return '\n'.join(key.dns_record(self.name) for key in self.dkim_keys)
 
     @cached_property
     def dns_dmarc(self):
@@ -279,11 +287,29 @@ class Domain(Base):
                 ('pop3s', 995, 10),
             ])
 
-        return [
-            f'_{proto}._tcp.{idna.encode(self.name.lower()).decode('ascii')}. 600 IN SRV {prio} 1 {port} {hostname}.' if port in ports else f'_{proto}._tcp.{idna.encode(self.name.lower()).decode('ascii')}. 600 IN SRV 0 0 0 .'
+        webdav_records = []
+        if app.config['WEBDAV'] != 'none':
+            if app.config['TLS_FLAVOR'] == 'notls':
+                protocols.extend([('carddav', 80, 10), ('caldav', 80, 10)])
+                webdav_protocols = ('carddav', 'caldav')
+            else:
+                protocols.extend([('carddavs', 443, 10), ('caldavs', 443, 10)])
+                webdav_protocols = ('carddavs', 'caldavs')
+            webdav_records = [
+                f'_{proto}._tcp.{idna.encode(self.name.lower()).decode("ascii")}. 600 IN TXT "path=/webdav/"'
+                for proto in webdav_protocols
+            ]
+
+        srv_records = [
+            f'_{proto}._tcp.{idna.encode(self.name.lower()).decode("ascii")}. 600 IN SRV {prio} 1 {port} {idna.encode(hostname.lower()).decode("ascii")}.' if port in ports else f'_{proto}._tcp.{idna.encode(self.name.lower()).decode("ascii")}. 600 IN SRV 0 0 0 .'
             for proto, port, prio
             in protocols
-        ]+[f'autoconfig.{idna.encode(self.name.lower()).decode('ascii')}. 600 IN CNAME {idna.encode(hostname.lower()).decode('ascii')}.', f'autodiscover.{idna.encode(self.name.lower()).decode('ascii')}. 600 IN CNAME {idna.encode(hostname.lower()).decode('ascii')}.']
+        ]
+
+        return srv_records + webdav_records + [
+            f'autoconfig.{idna.encode(self.name.lower()).decode("ascii")}. 600 IN CNAME {idna.encode(hostname.lower()).decode("ascii")}.',
+            f'autodiscover.{idna.encode(self.name.lower()).decode("ascii")}. 600 IN CNAME {idna.encode(hostname.lower()).decode("ascii")}.'
+        ]
 
     @cached_property
     def dns_tlsa(self):
@@ -305,34 +331,32 @@ class Domain(Base):
     @property
     def dkim_key(self):
         """ return private DKIM key """
-        if self._dkim_key is None:
-            file_path = self._dkim_file()
-            if os.path.exists(file_path):
-                with open(file_path, 'rb') as handle:
-                    self._dkim_key = self._dkim_key_on_disk = handle.read()
-            else:
-                self._dkim_key = self._dkim_key_on_disk = b''
-        return self._dkim_key if self._dkim_key else None
+        key = next((key for key in self.dkim_keys if key.active), None)
+        return key.private_key if key else None
 
     @dkim_key.setter
     def dkim_key(self, value):
         """ set private DKIM key """
-        old_key = self.dkim_key
-        self._dkim_key = value if value is not None else b''
-        if self._dkim_key != old_key:
-            if not sqlalchemy.event.contains(db.session, 'after_commit', _save_dkim_keys):
-                sqlalchemy.event.listen(db.session, 'after_commit', _save_dkim_keys)
+        if value is None:
+            return
+        key = next((key for key in self.dkim_keys if key.active), None)
+        if key:
+            key.private_key = value
+        else:
+            self.dkim_keys.append(DkimKey.create(self, value, 'rsa', active=True))
 
     @property
     def dkim_publickey(self):
         """ return public part of DKIM key """
-        dkim_key = self.dkim_key
-        if dkim_key:
-            return dkim.strip_key(dkim_key).decode('utf8')
+        key = next((key for key in self.dkim_keys if key.active), None)
+        if key:
+            return key.public
 
-    def generate_dkim_key(self):
-        """ generate new DKIM key """
-        self.dkim_key = dkim.gen_key()
+    def generate_dkim_key(self, algorithm='rsa', active=True):
+        """Generate a DKIM key, optionally leaving it staged for rotation."""
+        key = DkimKey.create(self, dkim.gen_ed25519_key() if algorithm == 'ed25519' else dkim.gen_key(), algorithm, active)
+        self.dkim_keys.append(key)
+        return key
 
     def has_email(self, localpart):
         """ checks if localpart is configured for domain """
@@ -369,9 +393,8 @@ class Alternative(Base):
     @property
     def dns_dkim(self):
         """ return DKIM record for domain """
-        if self.domain.dkim_key:
-            selector = app.config['DKIM_SELECTOR']
-            return f'{selector}._domainkey.{idna.encode(self.name.lower()).decode('ascii')}. 600 IN TXT "v=DKIM1; k=rsa; p={self.domain.dkim_publickey}"'
+        if self.domain.dkim_keys:
+            return '\n'.join(key.dns_record(self.name) for key in self.domain.dkim_keys)
 
     @cached_property
     def dns_dmarc(self):
@@ -418,6 +441,38 @@ class Alternative(Base):
             )
         except dns.exception.DNSException:
             return False
+
+
+class DkimKey(Base):
+    """A database-backed signing key, retained while staged or retired."""
+
+    __tablename__ = 'dkim_key'
+
+    id = db.Column(db.Integer, primary_key=True)
+    domain_name = db.Column(IdnaDomain, db.ForeignKey('domain.name', ondelete='CASCADE'), nullable=False, index=True)
+    selector = db.Column(db.String(32), nullable=False)
+    algorithm = db.Column(db.String(16), nullable=False, default='rsa')
+    private_key = db.Column(db.LargeBinary, nullable=False)
+    active = db.Column(db.Boolean, nullable=False, default=False)
+    retired = db.Column(db.Boolean, nullable=False, default=False)
+    domain = db.relationship('Domain', back_populates='dkim_keys')
+    __table_args__ = (db.UniqueConstraint('domain_name', 'selector'),)
+
+    @classmethod
+    def create(cls, domain, private_key, algorithm, active=False):
+        return cls(domain_name=domain.name, private_key=private_key, algorithm=algorithm,
+            active=active, selector=dkim.selector(private_key, algorithm))
+
+    @property
+    def public(self):
+        return dkim.public_key(self.private_key, self.algorithm)
+
+    def dns_record(self, domain_name):
+        name = idna.encode(domain_name.lower()).decode('ascii')
+        record = f'{self.selector}._domainkey.{name}. 600 IN TXT'
+        txt = f'v=DKIM1; k={self.algorithm}; p={self.public}'
+        chunks = [f'"{txt[pos:pos + 250]}"' for pos in range(0, len(txt), 250)]
+        return f'{record} {" ".join(chunks)}'
 
 
 class Relay(Base):
@@ -493,19 +548,25 @@ class Email(object):
         sqlalchemy.event.listen(cls.localpart, 'set', cls._update_localpart, propagate=True, retval=True)
         sqlalchemy.event.listen(cls.domain_name, 'set', cls._update_domain_name, propagate=True)
 
-    def sendmail(self, subject, body):
+    def sendmail(self, subject, body, *, html_body=None):
         """ send an email to the address """
         try:
             f_addr = f'{app.config["POSTMASTER"]}@{idna.encode(app.config["DOMAIN"]).decode("ascii")}'
             with smtplib.LMTP(host=app.config['FRONT_ADDRESS'], port=2525) as lmtp:
                 to_address = f'{self.localpart}@{idna.encode(self.domain_name).decode("ascii")}'
-                msg = text.MIMEText(body)
+                if html_body is None:
+                    msg = text.MIMEText(body, 'plain', 'utf-8')
+                else:
+                    msg = multipart.MIMEMultipart('alternative')
+                    msg.attach(text.MIMEText(body, 'plain', 'utf-8'))
+                    msg.attach(text.MIMEText(html_body, 'html', 'utf-8'))
                 msg['Subject'] = subject
                 msg['From'] = f_addr
                 msg['To'] = to_address
                 lmtp.sendmail(f_addr, [to_address], msg.as_string())
             return True
-        except smtplib.SMTPException:
+        except (smtplib.SMTPException, OSError):
+            app.logger.exception("Message delivery failed for %s", self.email)
             return False
 
     @classmethod
@@ -603,6 +664,7 @@ class User(Base, Email):
     reply_enabled = db.Column(db.Boolean, nullable=False, default=False)
     reply_subject = db.Column(db.String(255), nullable=True, default=None)
     reply_body = db.Column(db.Text, nullable=True, default=None)
+    reply_body_html = db.Column(db.Text, nullable=True)
     reply_startdate = db.Column(db.Date, nullable=False,
         default=date(1900, 1, 1))
     reply_enddate = db.Column(db.Date, nullable=False,
@@ -614,6 +676,10 @@ class User(Base, Email):
     spam_mark_as_read = db.Column(db.Boolean, nullable=False, default=True)
     spam_threshold = db.Column(db.Integer, nullable=False, default=lambda:int(app.config.get("DEFAULT_SPAM_THRESHOLD", 80)))
     change_pw_next_login = db.Column(db.Boolean, nullable=False, default=False)
+    passkey_enroll_next_login = db.Column(db.Boolean, nullable=False, default=False)
+    gpg_key = db.Column(db.Text, nullable=True)
+
+    passkeys = db.relationship('Passkey', back_populates='user', cascade='all, delete-orphan')
 
     # Flask-login attributes
     is_authenticated = True
@@ -634,6 +700,33 @@ class User(Base, Email):
             return ','.join(result)
         else:
             return self.email
+
+    @validates('reply_body')
+    def _plain_reply_changed(self, key, value):
+        # Existing API/CLI clients write plain text; discard stale formatting.
+        if value != self.reply_body:
+            self.reply_body_html = None
+        return value
+
+    @validates('reply_body_html')
+    def _formatted_reply_changed(self, key, value):
+        if not value:
+            return None
+        from mailu.announcements import sanitize
+        html, plain = sanitize(value)
+        self.reply_body = plain
+        return html
+
+    @property
+    def reply_mime(self):
+        if not self.reply_body_html:
+            return None
+        # Stable MIME preserves Sieve vacation duplicate suppression across requests.
+        boundary = 'mailu-vacation-' + hashlib.sha256(((self.reply_body or '') + '\0' + self.reply_body_html).encode()).hexdigest()[:32]
+        message = multipart.MIMEMultipart('alternative', boundary=boundary)
+        message.attach(text.MIMEText(self.reply_body or '', 'plain', 'utf-8'))
+        message.attach(text.MIMEText(self.reply_body_html, 'html', 'utf-8'))
+        return message.as_string()
 
     @property
     def reply_active(self):
@@ -757,7 +850,67 @@ set() containing the sessions to keep
     def login(cls, email, password):
         """ login user when enabled and password is valid """
         user = db.session.get(cls, email)
-        return user if (user and user.enabled and user.check_password(password)) else None
+        return user if (
+            user and user.enabled
+            and not app.config.get('PASSKEY_REQUIRED', False)
+            and not user.passkeys
+            and user.check_password(password)
+        ) else None
+
+
+class WkdKey(Base):
+    """Pre-filtered OpenPGP key material published for a WKD hash."""
+
+    __tablename__ = 'wkd_key'
+    key_hash = db.Column(db.String(32), primary_key=True, nullable=False)
+    domain_name = db.Column(IdnaDomain, primary_key=True, nullable=False)
+    user_email = db.Column(IdnaEmail, db.ForeignKey(User.email, ondelete='CASCADE'), primary_key=True, nullable=False)
+    fingerprint = db.Column(db.String(64), primary_key=True, nullable=False)
+    key_data = db.Column(db.LargeBinary, nullable=False)
+    user = db.relationship(User)
+
+
+def wkd_hash(localpart):
+    digest = hashlib.sha1(localpart.lower().encode('utf-8')).digest()
+    standard = base64.b32encode(digest).decode('ascii').lower().rstrip('=')
+    return standard.translate(str.maketrans(
+        'abcdefghijklmnopqrstuvwxyz234567', 'ybndrfg8ejkmcpqxot1uwisza345h769'))
+
+
+class Passkey(Base):
+    __tablename__ = 'passkey'
+
+    credential_id = db.Column(db.LargeBinary(1023), primary_key=True)
+    user_email = db.Column(db.String(255), db.ForeignKey('user.email', ondelete='CASCADE'), nullable=False, index=True)
+    public_key = db.Column(db.LargeBinary, nullable=False)
+    sign_count = db.Column(db.BigInteger, nullable=False, default=0)
+    aaguid = db.Column(db.String(36), nullable=False)
+    device_bound = db.Column(db.Boolean, nullable=True, default=None)
+    user_verified = db.Column(db.Boolean, nullable=True)
+    user_present = db.Column(db.Boolean, nullable=True)
+    backup_eligible = db.Column(db.Boolean, nullable=True)
+    attestation_format = db.Column(db.String(32), nullable=True)
+    credential_device_type = db.Column(db.String(16), nullable=True)
+    backed_up = db.Column(db.Boolean, nullable=True)
+    last_used_at = db.Column(db.DateTime(timezone=True), nullable=True)
+    name = db.Column(db.String(255), nullable=False, default='')
+    user = db.relationship('User', back_populates='passkeys')
+
+
+class AccountSetupToken(Base):
+    """A short-lived, single-use grant to set an account password or passkey."""
+
+    __tablename__ = 'passkey_enrollment'
+
+    token_hash = db.Column(db.String(64), primary_key=True)
+    user_email = db.Column(db.String(255), db.ForeignKey('user.email', ondelete='CASCADE'), nullable=False, index=True)
+    expires_at = db.Column(db.DateTime(timezone=True), nullable=False)
+    user = db.relationship('User')
+
+
+# Keep the old Python name for integrations while the existing database table
+# is still named passkey_enrollment.
+PasskeyEnrollment = AccountSetupToken
 
 
 class Alias(Base, Email):
@@ -839,6 +992,55 @@ class Alias(Base, Email):
 
 
 # end of Alias class helpers
+
+
+def wkd_addresses_for_user(user, uid_emails):
+    """Authorize only addresses present in the uploaded key's UIDs."""
+    # Load domain alternatives once, including those used by alias destinations.
+    alternatives = dict(db.session.query(Alternative.name, Alternative.domain_name).all())
+
+    def canonical(address):
+        localpart, domain_name = address.lower().rsplit('@', 1)
+        domain_name = idna.decode(idna.encode(domain_name))
+        return f'{localpart}@{alternatives.get(domain_name, domain_name)}'
+
+    target = canonical(user.email)
+    candidates = {address: canonical(address) for address in uid_emails}
+    addresses = {address for address, destination in candidates.items() if destination == target}
+    alias_addresses = set(candidates.values()) - {target}
+    if not alias_addresses:
+        return addresses
+
+    # A mailbox takes precedence over an alias with the same address.
+    mailboxes = {email for email, in db.session.query(User._email).filter(
+        User._email.in_(alias_addresses)).all()}
+    aliases = Alias.query.filter(
+        Alias._email.in_(alias_addresses - mailboxes),
+        Alias.wildcard.is_(False), Alias.disabled.is_(False),
+        sqlalchemy.or_(Alias.owner_email.is_(None), sqlalchemy.exists().where(
+            sqlalchemy.and_(User.email == Alias.owner_email, User.enabled.is_(True)))),
+    ).all()
+    authorized_aliases = {
+        canonical(alias.email) for alias in aliases
+        if any(canonical(destination) == target for destination in alias.destination)
+    }
+    addresses.update(address for address, destination in candidates.items()
+        if destination in authorized_aliases)
+    return addresses
+
+
+def update_wkd_keys(user, uid_keys):
+    """Replace this user's publications with already-authorized binary exports."""
+    WkdKey.query.filter_by(user_email=user.email).delete(synchronize_session=False)
+    for uid_email, fingerprint, key_data in uid_keys:
+        localpart, domain_name = uid_email.rsplit('@', 1)
+        db.session.add(WkdKey(
+            key_hash=wkd_hash(localpart),
+            domain_name=domain_name,
+            user_email=user.email,
+            fingerprint=fingerprint,
+            key_data=key_data,
+        ))
 
 
 class Token(Base):

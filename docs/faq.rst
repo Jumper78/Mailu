@@ -144,15 +144,13 @@ Your mail service will be reachable for IMAP, POP3, SMTP and Webmail at the addr
 How to make IPv6 work?
 ``````````````````````
 
-Docker IPv6 interfacing with ``ip6tables``, which is required for proper IPv6 support, is currently considered experimental.
-
-Although the supposed way to enable IPv6 would be to give each container a publicly routable address, docker's IPv6 support
-uses NAT to pass outside connections to the containers.
-
-Currently we recommend to use `docker-ipv6nat` by `Robert Klarenbeek <https://github.com/robbertkl>` instead of docker's
-experimental support.
+Current Docker releases support IPv6 on user-defined networks and publish IPv6 ports through ``ip6tables``. ``ip6tables`` is
+enabled by default on Linux hosts. See the
+`Docker IPv6 documentation <https://docs.docker.com/engine/daemon/ipv6/>`_ for details.
 
 Before enabling IPv6 you **MUST** disable the userland-proxy in your ``/etc/docker/daemon.json`` to not create an Open Relay!
+With the userland-proxy, containers see the bridge gateway address instead of the real client address, and Mailu trusts its own
+subnet, so anyone could relay mail through your instance.
 
 .. code-block:: json
 
@@ -160,26 +158,14 @@ Before enabling IPv6 you **MUST** disable the userland-proxy in your ``/etc/dock
       "userland-proxy": false
   }
 
-You can enable `docker-ipv6nat` like this:
+Restart Docker afterwards (``sudo systemctl restart docker``).
 
-  docker run -d --name ipv6nat --privileged --network host --restart unless-stopped -v /var/run/docker.sock:/var/run/docker.sock:ro -v /lib/modules:/lib/modules:ro robbertkl/ipv6nat
+Enable IPv6 in the `setup utility`_. This adds ``enable_ipv6: true`` and an IPv6 subnet (``SUBNET6``) to the Mailu network
+in ``docker-compose.yml``, and publishes the front service on ``[BIND6]:port`` as well as on IPv4. Mailu uses its own
+user-defined network, so no IPv6 keys are needed in ``daemon.json`` beyond the userland-proxy setting above.
 
-If you want to try docker's experimental IPv6 support, it can be enabled like this:
-
-.. code-block:: json
-
-  {
-      "userland-proxy": false,
-      "ipv6": true,
-      "experimental": true,
-      "fixed-cidr-v6": "fd00:1234:abcd::/48",
-      "ip6tables": true
-  }
-
-and enabling the IPv6 checkbox in the `setup utility`_.
-
-This setup however is not officially supported, and might result in unforeseen issues.
-With bad misconfiguration you might even cause your instance to become an Open Relay, you have been warned!
+Make sure the host has a global IPv6 address (``ip -6 addr``) and that your firewall allows the mail and web ports over IPv6.
+Also add AAAA records for your mail hostnames, otherwise other servers will only reach you over IPv4.
 
 .. _`setup utility`: https://setup.mailu.io
 
@@ -253,6 +239,10 @@ correct syntax. The following file names will be taken as override configuration
    - All ``$ROOT/overrides/postfix/*.map`` files
    - For both ``postfix.cf`` and ``postfix.master``, you need to put one configuration per line, as they are fed line-by-line
      to postfix.
+   - Mailu's SMTP server services run chrooted under ``/queue``. A custom
+     chrooted Postfix service can access the Postfix Podop socket at
+     ``/private/podop.socket``; unchrooted services should use
+     ``/tmp/podop.socket``.
    - ``logrotate.conf`` as ``$ROOT/overrides/postfix/logrotate.conf`` - Replaces the logrotate.conf file used for rotating ``POSTFIX_LOG_FILE``.
 - `Dovecot`_ - ``dovecot.conf`` in dovecot sub-directory. This file must be written in the
   Dovecot 2.4 syntax, see :ref:`dovecot24-override-label`.
@@ -478,6 +468,28 @@ Technical issues
 In this section we are trying to cover the most common problems our users are having.
 If your issue is not listed here, please consult issues with the `troubleshooting tag`_.
 
+Why does a passkey show unknown details?
+````````````````````````````````````````````````
+
+Older passkeys may have been enrolled before Mailu recorded all authenticator details. A successful sign-in records the flags returned by that authentication, the latest signature counter, and the last-use time. The attestation format is available only from enrollment, so it can remain unknown for a passkey enrolled before that information was stored. Removing and registering the passkey again records its enrollment details, but requires setting it up again in the authenticator.
+
+I cannot sign in because my administrator requires a passkey
+````````````````````````````````````````````````````````````
+
+If passkeys are required for your domain, sign in with your existing password;
+Mailu will then require you to register a passkey before you can continue. If
+the server-wide ``PASSKEY_REQUIRED`` setting is enabled, password sign-in is
+disabled. Ask a domain manager for a one-time account setup link. The link
+can also be used when you are locked out or cannot complete normal sign-in.
+
+How do I reset a password?
+``````````````````````````
+
+Ask a domain manager to generate a one-time setup or recovery link from your
+user's edit page. The link lets you set a new password or set up a passkey,
+depending on the account's passkey policy. It can be used once and expires
+after the configured lifetime.
+
 .. _delete_users:
 
 How to delete users?
@@ -644,6 +656,56 @@ Common problems:
 
 .. _`rate-limits`: https://letsencrypt.org/docs/rate-limits/
 
+.. _letsencrypt-http-01-connectivity:
+
+Why can't Mailu reach the Let's Encrypt HTTP challenge?
+............................................................
+
+With ``TLS_FLAVOR=letsencrypt`` or ``mail-letsencrypt``, Mailu checks that an
+HTTP challenge reaches its ``front`` container before requesting a certificate.
+Messages such as "Cannot reach ... on TCP port 80", "Skipping Let's Encrypt
+certificate issuance", or older ``Connection refused`` tracebacks from
+``/letsencrypt.py`` mean this check failed. Mailu retries automatically, but
+cannot obtain a certificate for an affected hostname until connectivity works.
+Secure services may be unavailable while no usable certificate exists.
+
+Check the following:
+
+- Every hostname in ``HOSTNAMES`` must resolve to your server's public address.
+  Publish an AAAA record only if IPv6 connectivity actually works.
+- Allow incoming **TCP port 80** through your firewall and forward it to the
+  ``front`` container. Opening port 443 alone does not allow HTTP-01 validation.
+- A Docker port bound to ``127.0.0.1`` (or ``::1``) only accepts connections
+  from the Docker host. Use a specific network address reachable from outside,
+  forwarding port 80 on your router if necessary. A loopback bind only works
+  with an additional proxy forwarding public requests to it.
+- A reverse proxy must forward ``/.well-known/acme-challenge/`` to Mailu's
+  HTTP listener, without authentication or redirects. If the proxy obtains
+  certificates itself, use ``TLS_FLAVOR=cert`` and supply those certificates
+  to Mailu instead.
+- The public hostname must also be reachable **from inside the front
+  container**. Behind a router, this may require hairpin NAT (also called
+  NAT loopback): connections from your internal network to the public address
+  must be forwarded back to Mailu.
+
+Run this command from the directory containing your Compose configuration,
+replacing ``mail.example.com`` with each hostname in ``HOSTNAMES``:
+
+.. code-block:: bash
+
+   docker compose exec front curl -v --connect-timeout 10 http://mail.example.com/.well-known/acme-challenge/testing
+
+A connection refusal or timeout indicates a connectivity problem. A ``404``
+shows that an HTTP server answered, but does **not** prove that the challenge
+reaches Mailu: this diagnostic path has no active challenge token. Mailu's own
+check uses a temporary token and verifies the response body. Also check
+reachability from a separate internet connection, since a successful internal
+check alone cannot prove public reachability.
+
+Do not add a hostname override pointing to ``127.0.0.1`` merely to bypass the
+check. It does not fix public reachability, and failed certificate requests
+can exhaust the certificate authority's rate limits.
+
 Copying certificates
 ....................
 
@@ -692,8 +754,11 @@ The ``Admin`` container logs failed logon attempt on the single sign on page.
 You will need to setup the proper Regex in the Fail2Ban configuration.
 Below an example how to do so.
 
-If you use a reverse proxy in front of Mailu, it is vital to set the environment variables REAL_IP_HEADER and REAL_IP_FROM.
-Without these environment variables, Mailu will not trust the remote client IP passed on by the reverse proxy and as a result your reverse proxy will be banned.
+If you use a reverse proxy in front of Mailu, configure Mailu to receive the original client IP.
+For the recommended TCP reverse-proxy setup, set ``PROXY_PROTOCOL`` for the proxied ports and
+``REAL_IP_FROM`` to the proxy's address; leave ``REAL_IP_HEADER`` unset. If your proxy forwards
+client addresses in HTTP headers, set both ``REAL_IP_HEADER`` and ``REAL_IP_FROM`` instead.
+Without the appropriate settings, Mailu may see the proxy's address as the client and ban the proxy.
 
 See the :ref:`configuration reference <reverse_proxy_headers>` for more information.
 

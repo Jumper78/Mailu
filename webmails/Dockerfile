@@ -33,7 +33,7 @@ RUN set -euxo pipefail \
   ; mkdir -p /run/nginx /conf
 
 # roundcube
-ENV ROUNDCUBE_URL=https://github.com/roundcube/roundcubemail/releases/download/1.6.19/roundcubemail-1.6.19-complete.tar.gz
+ENV ROUNDCUBE_URL=https://github.com/roundcube/roundcubemail/releases/download/1.6.20/roundcubemail-1.6.20-complete.tar.gz
 ENV CARDDAV_URL=https://github.com/mstilkerich/rcmcarddav/releases/download/v5.1.3/carddav-v5.1.3.tar.gz
 
 RUN set -euxo pipefail \
@@ -72,6 +72,7 @@ RUN set -euxo pipefail \
 # SnappyMail login
 COPY snappymail/login/include.php /var/www/snappymail/
 COPY snappymail/login/sso.php /var/www/snappymail/
+COPY snappymail/plugins/mailu-identities/ /var/www/snappymail/mailu-plugins/mailu-identities/
 
 # Parsed and moved at startup
 COPY snappymail/defaults/application.ini /defaults/
@@ -97,8 +98,8 @@ COPY snuffleupagus.rules /etc/snuffleupagus.rules.tpl
 VOLUME /data
 VOLUME /overrides
 
-CMD /start.py
+CMD ["/start.py"]
 
-HEALTHCHECK CMD curl -m3 -f -L http://localhost/ping || exit 1
+HEALTHCHECK CMD /usr/local/bin/supervisor-healthcheck && curl -m3 -f -L http://localhost/ping
 
 RUN echo $VERSION >> /version

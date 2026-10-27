@@ -33,6 +33,11 @@ This should not conflict with any networks to which your system is connected.
 (Internal and external!). Normally this does not need to be changed,
 unless there is a conflict with existing networks.
 
+The ``SUBNET6`` (default: unset) defines the IPv6 address range of the docker network used by Mailu.
+It is set by the setup utility when IPv6 is enabled and should be a ULA range (``fd00::/8``).
+When it is set, Mailu services listen on IPv6 addresses as well. Leave it unset to run IPv4 only.
+Enabling IPv6 also requires the Docker network to have IPv6 enabled, see :doc:`faq` for details.
+
 The ``POSTMASTER`` is the local part of the postmaster email address. It is
 recommended to setup a generic value and later configure a mail alias for that
 address.
@@ -141,6 +146,8 @@ email traffic from ``POSTMASTER@DOMAIN``.
 The ``FULL_TEXT_SEARCH`` variable (default: 'en') is a comma separated list of
 ISO 639-1 language codes, as listed under `Dovecot languages`_. This feature can
 be disabled (e.g. for performance reasons) by setting the variable to ``off``.
+Legacy boolean values such as ``on``, ``true``, ``yes``, and ``1`` enable
+English indexing; ``off``, ``false``, ``no``, and ``0`` disable indexing.
 
 You can set a global ``DEFAULT_QUOTA`` to be used for mailboxes when the domain has
 no specific quota configured.
@@ -229,7 +236,7 @@ Advanced settings
 -----------------
 
 
-The ``AUTH_REQUIRE_TOKENS`` (default: False) setting controls whether thick clients can authenticate using passwords or whether they are forced to use tokens/application specific passwords.
+The ``AUTH_REQUIRE_TOKENS`` (default: True) setting requires email clients to authenticate using authentication tokens (application-specific passwords). Create one token per app or device and save it in the client's incoming and outgoing password fields. Web sign-in continues to support account passwords and passkeys. Installations that need legacy password authentication for email clients can explicitly set ``AUTH_REQUIRE_TOKENS=False``.
 
 The ``API_TOKEN`` (default: None) setting configures the authentication token.
 The minimum length is 3 characters.
@@ -245,6 +252,34 @@ aiming to prevent credential stuffing (due to password re-use) on other systems.
 The ``SESSION_COOKIE_SECURE`` (default: True) setting controls the secure flag on
 the cookies of the administrative interface. It should only be turned off if you
 intend to access it over plain HTTP.
+
+The ``PASSKEY_RP_ID`` setting selects the WebAuthn relying-party ID for passkeys.
+It defaults to the first hostname in ``HOSTNAMES``. Set it to the domain users
+access the web interface through if that differs from the first hostname. Passkeys
+require a secure browser context, normally HTTPS.
+
+The ``PASSKEY_REQUIRED`` setting (default: ``False``) requires every account
+to use a passkey, across all domains. When enabled, password sign-in is disabled
+and the login form only offers passkey sign-in. Accounts without a passkey need
+a one-time account setup link from their domain administrator before they can
+sign in. This is a server-wide passwordless policy.
+
+Domain managers can instead enable **Require all users to enroll a passkey** in
+the domain's passkey policy. This requires users without a passkey to set one up
+after signing in, while allowing them to use their existing password to sign in.
+They cannot continue to other Mailu pages until enrollment is complete. A manager
+can create a one-time setup or recovery link from the user's edit page to help a
+locked-out user. The link can also set or reset a password when the account is
+allowed to use passwords. Global administrators can manage all domain settings; domain managers
+can edit only the passkey policy. For a per-user requirement, use **Require
+passkey** on the user's create or edit form; this option is hidden if
+the domain already requires passkeys or the server-wide setting is enabled.
+
+The ``ACCOUNT_SETUP_TOKEN_TTL`` setting controls how long one-time account setup
+and recovery links remain valid, in seconds. It defaults to ``604800`` (one
+week). A link can be used once to set a password or add a passkey, subject to
+account passkey policies. Generating a replacement invalidates any previous
+link for that account.
 
 ``SESSION_TIMEOUT`` (default: 3600) is the maximum amount of time in seconds between
 requests before a session is invalidated. ``PERMANENT_SESSION_LIFETIME`` (default: 108000)
@@ -283,11 +318,12 @@ and will improve compatibility with 3rd party tools.
 .. _reverse_proxy_headers:
 
 The ``REAL_IP_HEADER`` (default: unset) and ``REAL_IP_FROM`` (default: unset) settings
-controls whether HTTP headers such as ``X-Forwarded-For`` or ``X-Real-IP`` should be trusted.
-The former should be the name of the HTTP header to extract the client IP address from and the
-later a comma separated list of IP addresses designating which proxies to trust.
-If you are using Mailu behind a reverse proxy, you should set both. Setting the former without
-the latter introduces a security vulnerability allowing a potential attacker to spoof their source address.
+control whether HTTP headers such as ``X-Forwarded-For`` or ``X-Real-IP`` should be trusted.
+These settings are for HTTP-header-based proxies. For the recommended TCP reverse-proxy setup,
+use ``PROXY_PROTOCOL`` and ``REAL_IP_FROM`` instead, and leave ``REAL_IP_HEADER`` unset. If your
+proxy forwards client addresses in HTTP headers, set ``REAL_IP_HEADER`` to the header name and
+``REAL_IP_FROM`` to a comma-separated list of trusted proxy addresses. Setting the former without
+the latter introduces a security vulnerability that allows an attacker to spoof their source address.
 
 The ``TZ`` sets the timezone Mailu will use. The timezone naming convention usually uses a ``Region/City`` format. See `TZ database name`_  for a list of valid timezones This defaults to ``Etc/UTC``. Warning: if you are observing different timestamps in your log files you should change your hosts timezone to UTC instead of changing TZ to your local timezone. Using UTC allows easy log correlation with remote MTAs.
 
@@ -418,9 +454,14 @@ Once configured, any request to /sso/login with the correct headers will be auth
 
 Requests to:
 
-- "/sso/login" results the user being redirected to the web administration interface after authentication.
-- "/admin" (``WEB_ADMIN=/admin``) results the user being redirected to the web administration interface  after authentication.
-- "/webmail" (``WEB_WEBMAIL=/webmail``) results the user being redirected to the web administration interface  after authentication.
+- ``/sso/login`` use the browser preference from the last successful sign-in, defaulting to Webmail when enabled.
+- ``/sso/login/admin`` explicitly select ``WEB_ADMIN``.
+- ``/sso/login/webmail`` explicitly select ``WEB_WEBMAIL``.
+- Protected pages under ``WEB_ADMIN`` and ``WEB_WEBMAIL`` return to the original
+  page after authentication. Return destinations are stored server-side rather
+  than placed in internally generated ``?url=`` links.
+
+The ``mailu_signin_target`` cookie remembers only the selected application for one year. Explicit sign-in routes and protected-page return destinations override this preference. Existing same-origin ``?url=`` bookmarks remain supported.
 
 Use ``PROXY_AUTH_LOGOUT_URL`` (default: unset) to redirect users to a specific URL after they have been logged out.
 

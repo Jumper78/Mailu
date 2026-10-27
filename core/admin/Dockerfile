@@ -7,7 +7,7 @@ ARG VERSION=local
 LABEL version=$VERSION
 
 RUN set -euxo pipefail \
-  ; apk add --no-cache libressl mariadb-connector-c postgresql-libs
+  ; apk add --no-cache libressl mariadb-connector-c postgresql-libs gnupg
 
 COPY --from=assets /work/static/ ./mailu/static/
 
@@ -23,9 +23,9 @@ RUN set -euxo pipefail \
 RUN echo $VERSION >/version
 
 #EXPOSE 8080/tcp
-HEALTHCHECK CMD curl -m3 -skfLo /dev/null http://localhost:8080/ping
+HEALTHCHECK CMD /usr/local/bin/supervisor-healthcheck && curl -m3 -skfLo /dev/null http://localhost:8080/ping
 
 VOLUME ["/data","/dkim"]
 
 ENV FLASK_APP=mailu
-CMD /start.py
+CMD ["/start.py"]

@@ -5,6 +5,7 @@ from flask import current_app as app
 import validators
 import flask
 import flask_login
+import wtforms
 import wtforms_components
 
 
@@ -39,30 +40,39 @@ def domain_create():
                 flask.flash('Domain %s is already used' % form.name.data, 'error')
             else:
                 domain = models.Domain()
-                form.populate_obj(domain)
+                form.populate_domain(domain)
                 models.db.session.add(domain)
                 models.db.session.commit()
                 flask.flash('Domain %s created' % domain)
                 return flask.redirect(flask.url_for('.domain_list'))
         else:
             flask.flash('Domain %s is invalid' % form.name.data, 'error')
-    return flask.render_template('domain/create.html', form=form)
+    return flask.render_template('domain/create.html', form=form,
+        max_quota_bytes=forms.MAX_QUOTA_BYTES,
+        can_edit_domain_settings=True)
 
 
 @ui.route('/domain/edit/<domain_name>', methods=['GET', 'POST'])
-@access.global_admin
+@access.domain_admin(models.Domain, 'domain_name')
 def domain_edit(domain_name):
     domain = models.db.session.get(models.Domain, domain_name) or flask.abort(404)
-    form = forms.DomainForm(obj=domain)
-    wtforms_components.read_only(form.name)
-    form.name.validators = []
+    can_edit_domain_settings = flask_login.current_user.global_admin
+    form_class = forms.DomainForm if can_edit_domain_settings else forms.DomainPasskeyPolicyForm
+    form = form_class(obj=domain)
+    max_quota_bytes = max(forms.MAX_QUOTA_BYTES, domain.max_quota_bytes)
+    if can_edit_domain_settings:
+        form.max_quota_bytes.validators = [
+            wtforms.validators.NumberRange(min=0, max=max_quota_bytes)]
+        wtforms_components.read_only(form.name)
+        form.name.validators = []
     if form.validate_on_submit():
-        form.populate_obj(domain)
+        form.populate_domain(domain)
         models.db.session.commit()
         flask.flash('Domain %s saved' % domain)
         return flask.redirect(flask.url_for('.domain_list'))
     return flask.render_template('domain/edit.html', form=form,
-        domain=domain)
+        domain=domain, max_quota_bytes=max_quota_bytes,
+        can_edit_domain_settings=can_edit_domain_settings)
 
 
 @ui.route('/domain/delete/<domain_name>', methods=['GET', 'POST'])
@@ -80,18 +90,16 @@ def domain_delete(domain_name):
 @access.domain_admin(models.Domain, 'domain_name')
 def domain_details(domain_name):
     domain = models.db.session.get(models.Domain, domain_name) or flask.abort(404)
-    return flask.render_template('domain/details.html', domain=domain)
+    return flask.render_template('domain/details.html', domain=domain,
+        dkim_toggle_form=forms.DkimToggleForm())
 
 @ui.route('/domain/details/<domain_name>/zonefile', methods=['GET'])
 @access.domain_admin(models.Domain, 'domain_name')
 def domain_download_zonefile(domain_name):
     domain = models.db.session.get(models.Domain, domain_name) or flask.abort(404)
     res = [domain.dns_mx, domain.dns_spf]
-    if domain.dkim_publickey:
-        record = domain.dns_dkim.split('"', 1)[0].strip()
-        txt = f'v=DKIM1; k=rsa; p={domain.dkim_publickey}'
-        txt = ' '.join(f'"{txt[p:p+250]}"' for p in range(0, len(txt), 250))
-        res.append(f'{record} {txt}')
+    if domain.dkim_keys:
+        res.extend(key.dns_record(domain.name) for key in domain.dkim_keys)
         res.append(domain.dns_dmarc)
         if domain.dns_dmarc_report_needed:
             res.append(domain.dns_dmarc_report)
@@ -99,11 +107,8 @@ def domain_download_zonefile(domain_name):
     res.extend(domain.dns_autoconfig)
     for alternative in domain.alternatives:
         res.extend([alternative.dns_mx, alternative.dns_spf])
-        if alternative.domain.dkim_publickey:
-            record = alternative.dns_dkim.split('"', 1)[0].strip()
-            txt = f'v=DKIM1; k=rsa; p={alternative.domain.dkim_publickey}'
-            txt = ' '.join(f'"{txt[p:p+250]}"' for p in range(0, len(txt), 250))
-            res.append(f'{record} {txt}')
+        if alternative.domain.dkim_keys:
+            res.extend(key.dns_record(alternative.name) for key in alternative.domain.dkim_keys)
             res.append(alternative.dns_dmarc)
             if alternative.dns_dmarc_report_needed:
                 res.append(alternative.dns_dmarc_report)
@@ -117,14 +122,49 @@ def domain_download_zonefile(domain_name):
 
 @ui.route('/domain/genkeys/<domain_name>', methods=['GET', 'POST'])
 @access.domain_admin(models.Domain, 'domain_name')
-@access.confirmation_required("regenerate keys for {domain_name}")
+@access.confirmation_required("generate a DKIM key for {domain_name}")
 def domain_genkeys(domain_name):
     domain = models.db.session.get(models.Domain, domain_name) or flask.abort(404)
-    domain.generate_dkim_key()
+    algorithm = flask.request.values.get('algorithm', 'rsa')
+    if algorithm not in ('rsa', 'ed25519'):
+        flask.abort(400)
+    domain.generate_dkim_key(algorithm=algorithm, active=False)
     models.db.session.add(domain)
     models.db.session.commit()
     return flask.redirect(
         flask.url_for(".domain_details", domain_name=domain_name))
+
+
+@ui.route('/domain/dkim/<int:key_id>/active', methods=['POST'])
+@access.domain_admin(models.DkimKey, 'key_id')
+@access.confirmation_required("change signing status for DKIM key {key_id}")
+def domain_dkim_toggle(key_id):
+    form = forms.DkimToggleForm()
+    if not form.validate_on_submit():
+        flask.abort(400)
+    key = models.db.session.get(models.DkimKey, key_id) or flask.abort(404)
+    if key.active:
+        key.active = False
+        key.retired = True
+    elif key.retired:
+        flask.abort(409)
+    else:
+        key.active = True
+    models.db.session.commit()
+    return flask.redirect(flask.url_for('.domain_details', domain_name=key.domain_name))
+
+
+@ui.route('/domain/dkim/<int:key_id>/delete', methods=['POST'])
+@access.domain_admin(models.DkimKey, 'key_id')
+@access.confirmation_required("delete DKIM key {key_id}")
+def domain_dkim_delete(key_id):
+    key = models.db.session.get(models.DkimKey, key_id) or flask.abort(404)
+    if key.active:
+        flask.abort(409)
+    domain_name = key.domain_name
+    models.db.session.delete(key)
+    models.db.session.commit()
+    return flask.redirect(flask.url_for('.domain_details', domain_name=domain_name))
 
 
 @ui.route('/domain/signup', methods=['GET', 'POST'])

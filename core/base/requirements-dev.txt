@@ -32,6 +32,7 @@ mysql-connector-python
 passlib
 psycopg2-binary
 Pygments
+python-gnupg
 PyYAML
 redis
 SQLAlchemy
@@ -44,6 +45,7 @@ Werkzeug
 wonderwords
 WTForms
 WTForms-Components
+webauthn
 
 # core/nginx
 watchdog

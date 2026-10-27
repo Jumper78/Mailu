@@ -44,6 +44,15 @@ def advertise():
             pass
 
 
+@mailu.command('import-legacy-dkim-keys')
+@with_appcontext
+def import_legacy_dkim_keys():
+    """Import historical filesystem DKIM keys after database migrations."""
+    if models.inspect(models.db.engine).has_table('dkim_key'):
+        for domain in models.Domain.query.all():
+            domain._import_legacy_dkim_key()
+
+
 @mailu.command()
 @click.argument('localpart')
 @click.argument('domain_name')
@@ -208,7 +217,7 @@ def config_update(verbose=False, delete_objects=False):
     user_optional_params = ('comment', 'quota_bytes', 'global_admin',
                             'enable_imap', 'enable_pop', 'forward_enabled',
                             'forward_destination', 'reply_enabled',
-                            'reply_subject', 'reply_body', 'displayed_name',
+                            'reply_subject', 'reply_body', 'reply_body_html', 'displayed_name',
                             'spam_enabled', 'spam_mark_as_read', 'email', 'spam_threshold')
     for user_config in users:
         if verbose:

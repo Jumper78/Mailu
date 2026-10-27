@@ -77,7 +77,7 @@ DEFAULT_CONFIG = {
     'LOGO_URL': None,
     'LOGO_BACKGROUND': None,
     # Advanced settings
-    'AUTH_REQUIRE_TOKENS': False,
+    'AUTH_REQUIRE_TOKENS': True,
     'API': False,
     'WEB_API': '/api',
     'API_TOKEN': None,
@@ -88,6 +88,9 @@ DEFAULT_CONFIG = {
     'SESSION_TIMEOUT': 3600,
     'PERMANENT_SESSION_LIFETIME': 30*24*3600,
     'SESSION_COOKIE_SECURE': None,
+    'PASSKEY_RP_ID': '',
+    'PASSKEY_REQUIRED': False,
+    'ACCOUNT_SETUP_TOKEN_TTL': 7 * 24 * 3600,
     'CREDENTIAL_ROUNDS': 13,
     'TLS_PERMISSIVE': True,
     'TZ': 'Etc/UTC',
@@ -99,6 +102,7 @@ DEFAULT_CONFIG = {
     'PROXY_AUTH_LOGOUT_URL': None,
     'SUBNET': '192.168.203.0/24',
     'SUBNET6': None,
+    'WEBDAV': '',
 }
 
 class ConfigManager:
@@ -142,6 +146,9 @@ class ConfigManager:
             key: self.__coerce_value(self.__get_env(key, value))
             for key, value in DEFAULT_CONFIG.items()
         })
+        self.config['ACCOUNT_SETUP_TOKEN_TTL'] = int(
+            self.config['ACCOUNT_SETUP_TOKEN_TTL'],
+        )
 
         # automatically set the sqlalchemy string
         if self.config['DB_FLAVOR']:

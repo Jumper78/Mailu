@@ -30,7 +30,7 @@ marshmallow
 marshmallow-sqlalchemy
 mysql-connector-python
 passlib
-psycopg2-binary
+psycopg[c]
 Pygments
 python-gnupg
 PyYAML

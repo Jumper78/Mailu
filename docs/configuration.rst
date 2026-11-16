@@ -250,6 +250,8 @@ entry should point at something other than your website -- an imprint or a
 contact page, say -- because there is a single such entry and renaming it means
 you no longer link your website. A value set here is shown as-is and is not
 translated, so pick a label your users understand.
+When set, the sign-in page shows the same link under that label, so an imprint
+is reachable without logging in.
 
 - ``LOGO_BACKGROUND`` sets a custom background colour for the brand logo
   in the top-left of the main admin interface.

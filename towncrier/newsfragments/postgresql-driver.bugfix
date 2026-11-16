@@ -1,0 +1,1 @@
+Fix the admin container failing to start with a PostgreSQL database (`ModuleNotFoundError: No module named 'psycopg'`). SQLAlchemy 2.1 selects psycopg 3 for a bare `postgresql://` URI while the image ships psycopg2, so the driver is now named explicitly for `DB_FLAVOR=postgresql` and for a `SQLALCHEMY_DATABASE_URI` that leaves it out.

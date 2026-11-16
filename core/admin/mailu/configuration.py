@@ -173,6 +173,12 @@ class ConfigManager:
             template = self.DB_TEMPLATES[self.config['DB_FLAVOR']]
             self.config['SQLALCHEMY_DATABASE_URI'] = template.format(**self.config)
 
+        # SQLAlchemy 2.1 resolves a bare postgresql:// to psycopg (version 3),
+        # which the image does not ship. Name the driver that is installed.
+        database_uri = self.config['SQLALCHEMY_DATABASE_URI']
+        if database_uri.startswith('postgresql://'):
+            self.config['SQLALCHEMY_DATABASE_URI'] = database_uri.replace('postgresql://', 'postgresql+psycopg2://', 1)
+
         if not self.config.get('RATELIMIT_STORAGE_URL'):
             self.config['RATELIMIT_STORAGE_URL'] = f'redis://{self.config["REDIS_ADDRESS"]}/2'
 

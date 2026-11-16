@@ -17,6 +17,9 @@ RUN set -euxo pipefail \
   ; ! [[ "$(apk --print-arch)" == x86_64 ]] \
     || apk add --no-cache --repository=http://dl-cdn.alpinelinux.org/alpine/edge/testing hardened-malloc
 
+COPY download-github-asset /usr/local/bin/download-github-asset
+RUN chmod 755 /usr/local/bin/download-github-asset
+
 WORKDIR /app
 
 COPY supervisor-healthcheck /usr/local/bin/supervisor-healthcheck
@@ -56,18 +59,38 @@ ENV \
 # snuffleupagus' Makefile calls the unversioned "phpize", which alpine ships
 # only for its current default php -- and that moves every release. Pin both
 # wrappers to the php it builds for.
-RUN set -euxo pipefail \
+RUN --mount=type=secret,id=github_token,required=false set -euxo pipefail \
   ;  machine="$(apk --print-arch)" \
   ; deps="build-base gcc libffi-dev python3-dev mariadb-dev" \
   ; [[ "${machine}" != x86_64 ]] && \
       deps="${deps} rust cargo cmake git libretls-dev mariadb-connector-c-dev postgresql-dev" \
   ; apk add --virtual .build-deps ${deps} \
-  ; [[ "${machine}" == armv7* ]] && \
-      mkdir -p /root/.cargo/registry/index && \
-      git clone --bare https://github.com/rust-lang/crates.io-index.git /root/.cargo/registry/index/github.com-1285ae84e5963aae \
+  ; set +x \
+  ; github_token="$(cat /run/secrets/github_token 2>/dev/null || true)" \
+  ; if [[ "${machine}" == armv7* ]]; then \
+      mkdir -p /root/.cargo/registry/index; \
+      for attempt in 1 2 3; do \
+        if [ -n "$github_token" ]; then \
+          auth_header="$(printf 'x-access-token:%s' "$github_token" | base64 | tr -d '\n')"; \
+          if git -c "http.extraheader=AUTHORIZATION: basic $auth_header" clone --bare https://github.com/rust-lang/crates.io-index.git /root/.cargo/registry/index/github.com-1285ae84e5963aae; then clone_status=0; else clone_status=$?; fi; \
+          unset auth_header; \
+        elif git clone --bare https://github.com/rust-lang/crates.io-index.git /root/.cargo/registry/index/github.com-1285ae84e5963aae; then clone_status=0; else clone_status=$?; fi; \
+        if [ "$clone_status" -eq 0 ]; then break; fi; \
+        rm -rf /root/.cargo/registry/index/github.com-1285ae84e5963aae; \
+        if [ "$attempt" -eq 3 ]; then exit 1; fi; \
+        sleep 5; \
+      done; \
+    fi \
+  ; set -x \
   # bcrypt 4.3 builds from source on arm/v7 and uses Python's stable ABI.
   ; PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1 pip install -r requirements-${MAILU_DEPS}.txt \
-  ; curl -sL ${SNUFFLEUPAGUS_URL} | tar xz \
+  ; set +x \
+  ; download-github-asset "${SNUFFLEUPAGUS_URL}" /tmp/snuffleupagus.tgz \
+  ; mkdir -p snuffleupagus-${SNUFFLEUPAGUS_VERSION} \
+  ; tar xzf /tmp/snuffleupagus.tgz --strip-components=1 -C snuffleupagus-${SNUFFLEUPAGUS_VERSION} \
+  ; rm /tmp/snuffleupagus.tgz \
+  ; unset github_token \
+  ; set -x \
   ; cd snuffleupagus-${SNUFFLEUPAGUS_VERSION} \
   ; rm -rf src/tests/*php7*/ src/tests/*session*/ src/tests/broken_configuration/ src/tests/*cookie* src/tests/upload_validation/ \
   ; apk add --virtual .build-deps php84-dev php84-cgi php84-simplexml php84-xml pcre-dev build-base php84-pear php84-openssl re2c \

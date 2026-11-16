@@ -46,6 +46,13 @@ def global_admin(args, kwargs):
     return flask_login.current_user.global_admin
 
 
+@permissions_wrapper
+def spam_admin(args, kwargs):
+    """Shared spam settings are editable by global or domain administrators."""
+    user = flask_login.current_user
+    return user.global_admin or bool(user.get_managed_domains())
+
+
 def _can_manage_user(actor, target):
     """ Whether ``actor`` may manage the account of ``target`` (a User).
 
@@ -133,10 +140,11 @@ def confirmation_required(action):
         @functools.wraps(function)
         def wrapper(*args, **kwargs):
             form = forms.ConfirmationForm()
-            if form.validate_on_submit():
+            if form.validate_on_submit() and form.submit.data:
                 return function(*args, **kwargs)
+            action_text = action(*args, **kwargs) if callable(action) else action.format(*args, **kwargs)
             return flask.render_template(
-                "confirm.html", action=action.format(*args, **kwargs),
+                "confirm.html", action=action_text,
                 form=form
             )
         return wrapper

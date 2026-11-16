@@ -1,5 +1,5 @@
 from werkzeug.utils import redirect
-from mailu import models, utils, auth_flow, signin, passkeys as passkey_utils
+from mailu import models, utils, auth_flow, signin, webmail, passkeys as passkey_utils
 from mailu.sso import sso, forms
 from mailu.ui import access
 
@@ -10,6 +10,7 @@ import flask_login
 import secrets
 import ipaddress
 from markupsafe import Markup
+from urllib.parse import urlsplit
 
 @sso.route('/login', methods=['GET', 'POST'], defaults={'target': None})
 @sso.route('/login/<any(admin,webmail):target>', methods=['GET', 'POST'])
@@ -23,14 +24,23 @@ def login(target):
         signin.remember(flask.request.args['url'])
     if flask.request.headers.get(app.config['PROXY_AUTH_HEADER']) and 'noproxyauth' not in flask.request.args:
         return _proxy()
+    if flask_login.current_user.is_authenticated:
+        return flask.redirect(signin.resolve(target))
 
     client_ip = flask.request.headers.get('X-Real-IP', flask.request.remote_addr)
     client_port = flask.request.headers.get('X-Real-Port', None)
     form = forms.LoginForm()
     form.destination.choices = [(value, label) for value, label in form.destination.choices
                                 if (value == 'admin' and str(app.config['ADMIN']).upper() != 'FALSE')
-                                or (value == 'webmail' and str(app.config['WEBMAIL']).upper() != 'NONE')]
+                                or (value == 'webmail' and webmail.available(app.config))]
     pending_destination = signin.pending()
+    if (flask.request.method == 'GET' and pending_destination
+            and urlsplit(pending_destination).path ==
+            f"{app.config['WEB_ADMIN'].rstrip('/')}/oauth2/authorize"):
+        flask.flash(
+            _('After signing in, you will be redirected to approve this mail app’s requested access.'),
+            'info',
+        )
     explicit_selection = target is not None or form.destination_explicit.data == '1'
     selected = target or form.destination.data or signin.default_target()
     if form.submitAdmin.data:

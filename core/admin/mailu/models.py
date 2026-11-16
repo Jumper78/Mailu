@@ -5,8 +5,10 @@ import os
 import json
 import base64
 import hashlib
+import secrets
+import secrets
 
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from email.mime import text, multipart
 from itertools import chain
 
@@ -38,6 +40,10 @@ logging.getLogger('passlib').setLevel(logging.ERROR)
 
 
 db = flask_sqlalchemy.SQLAlchemy()
+
+def _new_dovecot_uid():
+    # Keep virtual mailbox IDs away from the low system-account range.
+    return 100000 + secrets.randbelow(2_000_000_000 - 100000)
 
 
 class IdnaDomain(db.TypeDecorator):
@@ -189,7 +195,10 @@ class Domain(Base):
         backref=db.backref('manager_of'), lazy='dynamic')
     max_users = db.Column(db.Integer, nullable=False, default=-1)
     max_aliases = db.Column(db.Integer, nullable=False, default=-1)
+    # Maximum quota assigned to each mailbox in the domain (0 = unlimited).
     max_quota_bytes = db.Column(db.BigInteger, nullable=False, default=0)
+    # Best-effort aggregate limit across all mailboxes in the domain (0 = unlimited).
+    max_domain_quota_bytes = db.Column(db.BigInteger, nullable=False, default=0)
     signup_enabled = db.Column(db.Boolean, nullable=False, default=False)
     # Anonymous Email Service integration: enable domain to accept API-generated aliases
     anonmail_enabled = db.Column(db.Boolean, nullable=False, default=False)
@@ -271,42 +280,27 @@ class Domain(Base):
 
     @cached_property
     def dns_autoconfig(self):
-        """ return list of auto configuration records (RFC6186) """
-        ports = {int(port.strip()) for port in app.config['PORTS'].split(',')}.union({465, 993})
+        """Return legacy autoconfig aliases and WebDAV discovery records."""
         hostname = app.config['HOSTNAME']
-        protocols = [
-            ('imap', 143, 20),
-            ('pop3', 110, 20),
-            ('submission', 587, 20),
-        ]
-        if app.config['TLS_FLAVOR'] != 'notls':
-            protocols.extend([
-                ('autodiscover', 443, 10),
-                ('submissions', 465, 10),
-                ('imaps', 993, 10),
-                ('pop3s', 995, 10),
-            ])
-
         webdav_records = []
-        if app.config['WEBDAV'] != 'none':
+        if app.config['WEBDAV'] == 'radicale':
             if app.config['TLS_FLAVOR'] == 'notls':
-                protocols.extend([('carddav', 80, 10), ('caldav', 80, 10)])
-                webdav_protocols = ('carddav', 'caldav')
+                webdav_protocols = (('carddav', 80), ('caldav', 80))
             else:
-                protocols.extend([('carddavs', 443, 10), ('caldavs', 443, 10)])
-                webdav_protocols = ('carddavs', 'caldavs')
-            webdav_records = [
-                f'_{proto}._tcp.{idna.encode(self.name.lower()).decode("ascii")}. 600 IN TXT "path=/webdav/"'
-                for proto in webdav_protocols
-            ]
+                webdav_protocols = (('carddavs', 443), ('caldavs', 443))
+            ports = {int(port.strip()) for port in app.config['PORTS'].split(',')}
+            domain = idna.encode(self.name.lower()).decode("ascii")
+            target = idna.encode(hostname.lower()).decode("ascii")
+            for proto, port in webdav_protocols:
+                srv_target = f'10 1 {port} {target}.' if port in ports else '0 0 0 .'
+                webdav_records.append(
+                    f'_{proto}._tcp.{domain}. 600 IN SRV {srv_target}'
+                )
+                webdav_records.append(
+                    f'_{proto}._tcp.{domain}. 600 IN TXT "path=/webdav/"'
+                )
 
-        srv_records = [
-            f'_{proto}._tcp.{idna.encode(self.name.lower()).decode("ascii")}. 600 IN SRV {prio} 1 {port} {idna.encode(hostname.lower()).decode("ascii")}.' if port in ports else f'_{proto}._tcp.{idna.encode(self.name.lower()).decode("ascii")}. 600 IN SRV 0 0 0 .'
-            for proto, port, prio
-            in protocols
-        ]
-
-        return srv_records + webdav_records + [
+        return webdav_records + [
             f'autoconfig.{idna.encode(self.name.lower()).decode("ascii")}. 600 IN CNAME {idna.encode(hostname.lower()).decode("ascii")}.',
             f'autodiscover.{idna.encode(self.name.lower()).decode("ascii")}. 600 IN CNAME {idna.encode(hostname.lower()).decode("ascii")}.'
         ]
@@ -635,12 +629,50 @@ class Email(object):
 
         return None
 
+    @classmethod
+    def resolve_mailboxes(cls, address, seen=None):
+        """Resolve an address through aliases and forwards to local mailboxes."""
+        if not isinstance(address, str) or address.count('@') != 1:
+            return []
+        localpart, domain_name = cls.resolve_domain(address.strip().lower())
+        if not localpart or not db.session.get(Domain, domain_name):
+            return []
+
+        address = f'{localpart}@{domain_name}'.lower()
+        seen = set() if seen is None else seen
+        if address in seen:
+            return []
+        seen.add(address)
+
+        destinations = cls.resolve_destination(localpart, domain_name)
+        if destinations is None:
+            return []
+
+        mailboxes = {}
+        if address in {destination.strip().lower() for destination in destinations
+                       if isinstance(destination, str)}:
+            mailbox = User.get(address)
+            if not mailbox and (delimiters := os.environ.get('RECIPIENT_DELIMITER')):
+                stripped = next((index for index, char in enumerate(localpart)
+                                 if char in delimiters), None)
+                if stripped is not None:
+                    mailbox = User.get(f'{localpart[:stripped]}@{domain_name}')
+            if mailbox:
+                mailboxes[mailbox.email.lower()] = mailbox
+        for destination in destinations:
+            if not isinstance(destination, str) or destination.count('@') != 1:
+                continue
+            for resolved in cls.resolve_mailboxes(destination, seen):
+                mailboxes[resolved.email.lower()] = resolved
+        return list(mailboxes.values())
+
 
 class User(Base, Email):
     """ A user is an email address that has a password to access a mailbox.
     """
 
     __tablename__ = 'user'
+    __table_args__ = (db.Index('ix_user_domain_name', 'domain_name'),)
     _ctx = None
     _credential_cache = {}
 
@@ -649,6 +681,8 @@ class User(Base, Email):
     password = db.Column(db.String(255), nullable=False)
     quota_bytes = db.Column(db.BigInteger, nullable=False, default=10**9)
     quota_bytes_used = db.Column(db.BigInteger, nullable=False, default=0)
+    # Stable Unix identity used by Dovecot for per-mailbox filesystem isolation.
+    dovecot_uid = db.Column(db.Integer, unique=True, nullable=False, default=_new_dovecot_uid)
     global_admin = db.Column(db.Boolean, nullable=False, default=False)
     enabled = db.Column(db.Boolean, nullable=False, default=True)
 
@@ -671,6 +705,7 @@ class User(Base, Email):
         default=date(2999, 12, 31))
 
     # Settings
+    webmail_preference = db.Column(db.String(32), nullable=True)
     displayed_name = db.Column(db.String(160), nullable=False, default='')
     spam_enabled = db.Column(db.Boolean, nullable=False, default=True)
     spam_mark_as_read = db.Column(db.Boolean, nullable=False, default=True)
@@ -817,6 +852,9 @@ in clear-text regardless of the presence of the cache.
 set() containing the sessions to keep
         """
         self.password = password if raw else User.get_password_context().hash(password)
+        if sqlalchemy.inspect(self).persistent:
+            from mailu.oauth2 import force_user_reauthentication
+            force_user_reauthentication(self, 'password changed')
         if keep_sessions is not True and self.email is not None:
             utils.MailuSessionExtension.prune_sessions(uid=self.email, keep=keep_sessions)
 
@@ -1079,6 +1117,58 @@ class Token(Base):
         return f'<Token #{self.id}: {self.comment or self.ip or self.password}>'
 
 
+class OAuth2AuthorizationCode(Base):
+    """One-time, PKCE-bound authorization code for a native mail client."""
+
+    __tablename__ = 'oauth2_authorization_code'
+
+    code_hash = db.Column(db.String(64), primary_key=True)
+    user_email = db.Column(db.String(255), db.ForeignKey(User.email, ondelete='CASCADE'), nullable=False, index=True)
+    user = db.relationship(User, backref=db.backref('oauth2_authorization_codes', cascade='all, delete-orphan'))
+    client_id = db.Column(db.String(80), nullable=False)
+    redirect_uri = db.Column(db.String(2048), nullable=False)
+    scope = db.Column(db.String(255), nullable=False)
+    code_challenge = db.Column(db.String(128), nullable=False)
+    expires_at = db.Column(db.Integer, nullable=False, index=True)
+
+
+class OAuth2Grant(Base):
+    """Revocable OAuth access and refresh tokens for one authorized client."""
+
+    __tablename__ = 'oauth2_grant'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_email = db.Column(db.String(255), db.ForeignKey(User.email, ondelete='CASCADE'), nullable=False, index=True)
+    user = db.relationship(User, backref=db.backref('oauth2_grants', cascade='all, delete-orphan'))
+    grant_id = db.Column(
+        db.String(22), nullable=False, unique=True,
+        default=lambda: secrets.token_urlsafe(16),
+    )
+    client_id = db.Column(db.String(80), nullable=False)
+    token_generation = db.Column(db.Integer, nullable=False, default=0)
+    scope = db.Column(db.String(255), nullable=False)
+    access_expires_at = db.Column(db.Integer, nullable=False, index=True)
+    refresh_expires_at = db.Column(db.Integer, nullable=True, index=True)
+    client_name = db.Column(db.String(120), nullable=False, default='Mail app')
+    last_refresh_at = db.Column(db.Integer, nullable=True)
+
+    @property
+    def access_expiration(self):
+        return datetime.fromtimestamp(self.access_expires_at, timezone.utc)
+
+    @property
+    def last_refresh(self):
+        return datetime.fromtimestamp(self.last_refresh_at, timezone.utc) if self.last_refresh_at else None
+
+    @property
+    def last_token_rotation(self):
+        if self.last_refresh_at:
+            return datetime.fromtimestamp(self.last_refresh_at, timezone.utc)
+        return self.access_expiration - timedelta(
+            seconds=app.config['OAUTH2_ACCESS_TOKEN_TTL'],
+        )
+
+
 class Fetch(Base):
     """ A fetched account is a remote POP/IMAP account fetched into a local
     account.
@@ -1277,11 +1367,15 @@ class MailuConfig:
     def __init__(self):
 
         # section-name -> attr
-        self._sections = {
-            name: getattr(self, name)
-            for name in dir(self)
-            if isinstance(getattr(self, name), self.MailuCollection)
-        }
+        self._sections = {}
+        for name, collection in vars(type(self)).items():
+            if isinstance(collection, self.MailuCollection):
+                # Keep cached database rows local to this config export/import.
+                # Sharing these class-level collections leaks one app context's
+                # rows into later config operations.
+                section = self.MailuCollection(collection.model)
+                setattr(self, name, section)
+                self._sections[name] = section
 
         # known models
         self._models = tuple(section.model for section in self._sections.values())
@@ -1358,7 +1452,17 @@ class MailuConfig:
         db.session.flush()
 
     def check(self):
-        """ check for duplicate domain names """
+        """Check the imported configuration for invalid domain references."""
+        with db.session.no_autoflush:
+            domain_names = {domain.name for domain in self.domain}
+            for collection in (self.user, self.alias):
+                for item in collection:
+                    if item.domain_name not in domain_names:
+                        raise ValueError(
+                            f'{item.__class__.__name__} {item.email!r} refers to '
+                            f'missing domain {item.domain_name!r}'
+                        )
+
         dup = set()
         for fqdn in chain(
             db.session.query(Domain.name),

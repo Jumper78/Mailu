@@ -1,19 +1,23 @@
 """ Mailu command line interface
 """
 
-import sys
+from copy import copy
 import os
 import socket
+import sys
 import uuid
+import secrets
 
 import click
 import yaml
 
 from flask import current_app as app
+from flask import url_for
 from flask.cli import FlaskGroup, with_appcontext
 
-from mailu import models
+from mailu import models, oauth2
 from mailu.schemas import MailuSchema, Logger, RenderJSON
+from mailu import setup_tokens
 
 
 db = models.db
@@ -53,71 +57,151 @@ def import_legacy_dkim_keys():
             domain._import_legacy_dkim_key()
 
 
-@mailu.command()
-@click.argument('localpart')
-@click.argument('domain_name')
-@click.argument('password')
-@click.option('-m', '--mode', default='create', metavar='MODE', help='''\b'create' (default): create user. it's an error if user already exists
-'ifmissing': only update password if user is missing
-'update': create user or update password if user exists
-''')
+@mailu.command('migrate-quarantine-storage')
 @with_appcontext
-def admin(localpart, domain_name, password, mode):
-    """ Create an admin user
-    """
+def migrate_quarantine_storage():
+    """Move legacy quarantine and greylist files to the sharded layout."""
+    from mailu import quarantine, quarantine_repository
+    count = quarantine_repository.migrate_flat_repository(quarantine.directory())
+    click.echo(f'Migrated {count} quarantine and greylist records')
 
-    if not mode in ('create', 'update', 'ifmissing'):
-        raise click.ClickException(f'invalid mode: {mode!r}')
 
+@mailu.command('cleanup-oauth2')
+@with_appcontext
+def cleanup_oauth2():
+    """Remove expired OAuth authorization codes and old grant rows."""
+    removed_codes, removed_grants = oauth2.cleanup_expired_records()
+    click.echo(
+        f'Removed {removed_codes} expired OAuth authorization codes and '
+        f'{removed_grants} expired OAuth grants'
+    )
+
+
+def _user_email(username):
+    if '@' in username:
+        return username
+    return f"{username}@{app.config['DOMAIN']}"
+
+
+@mailu.group(invoke_without_command=True)
+@with_appcontext
+@click.pass_context
+def user(ctx):
+    """List and manage user accounts."""
+    if ctx.invoked_subcommand is None:
+        for account in models.User.query.order_by(models.User.email).all():
+            click.echo(account.email)
+
+
+@user.command('add')
+@click.argument('username')
+@click.argument('password', required=False)
+@with_appcontext
+def user_add(username, password):
+    """Create a user and print a one-time setup URL."""
+    email = _user_email(username)
+    localpart, domain_name = email.rsplit('@', 1)
     domain = models.db.session.get(models.Domain, domain_name)
     if not domain:
         domain = models.Domain(name=domain_name)
         db.session.add(domain)
-
-    email = f'{localpart}@{domain_name}'
-    if user := models.db.session.get(models.User, email):
-        if mode == 'ifmissing':
-            print(f'user {email!r} exists, not updating')
-            return
-        elif mode == 'update':
-            user.set_password(password)
-            db.session.commit()
-            print("updated admin password")
-        else:
-            raise click.ClickException(f'user {email!r} exists, not created')
-    else:
-        user = models.User(
-            localpart=localpart,
-            domain=domain,
-            global_admin=True
-        )
-        db.session.add(user)
-        user.set_password(password)
-        db.session.commit()
-        print("created admin user")
-
-
-@mailu.command()
-@click.argument('localpart')
-@click.argument('domain_name')
-@click.argument('password')
-@with_appcontext
-def user(localpart, domain_name, password):
-    """ Create a user
-    """
-    domain = models.db.session.get(models.Domain, domain_name)
-    if not domain:
-        domain = models.Domain(name=domain_name)
-        db.session.add(domain)
-    user = models.User(
-        localpart=localpart,
-        domain=domain,
-        global_admin=False,
+    if models.db.session.get(models.User, email):
+        raise click.ClickException(f'user {email!r} already exists')
+    account = models.User(
+        localpart=localpart, domain=domain, global_admin=False,
         change_pw_next_login=True,
     )
-    user.set_password(password)
-    db.session.add(user)
+    create_setup_link = password is None
+    account.set_password(
+        password if password is not None else secrets.token_urlsafe(48),
+    )
+    db.session.add(account)
+    if create_setup_link:
+        raw_token, expires_at = setup_tokens.issue(
+            account, app.config['ACCOUNT_SETUP_TOKEN_TTL'],
+        )
     db.session.commit()
+    if create_setup_link:
+        hostname = app.config['HOSTNAMES'].split(',')[0]
+        with app.test_request_context(base_url=f"https://{hostname}"):
+            link = url_for('sso.account_setup', token=raw_token, _external=True)
+        click.echo(f"One-time account setup link (expires {expires_at.isoformat()}): {link}")
+
+
+@user.command('remove')
+@click.argument('username')
+@click.option('--really', is_flag=True, help='Permanently delete the user.')
+@with_appcontext
+def user_remove(username, really):
+    """Disable or permanently delete a user account."""
+    email = _user_email(username)
+    account = models.db.session.get(models.User, email)
+    if not account:
+        raise click.ClickException(f'user {email!r} does not exist')
+    if really:
+        db.session.delete(account)
+    else:
+        account.enabled = False
+    db.session.commit()
+    click.echo(f"removed user {email!r}")
+
+
+@user.command('reset')
+@click.argument('username')
+@with_appcontext
+def user_reset(username):
+    """Issue a fresh one-time account setup or recovery URL."""
+    email = _user_email(username)
+    account = models.db.session.get(models.User, email)
+    if not account:
+        raise click.ClickException(f'user {email!r} does not exist')
+    raw_token, expires_at = setup_tokens.issue(
+        account, app.config['ACCOUNT_SETUP_TOKEN_TTL'],
+    )
+    db.session.commit()
+    hostname = app.config['HOSTNAMES'].split(',')[0]
+    with app.test_request_context(base_url=f"https://{hostname}"):
+        link = url_for('sso.account_setup', token=raw_token, _external=True)
+    click.echo(f"One-time account setup or recovery link (expires {expires_at.isoformat()}): {link}")
+
+
+@mailu.group(invoke_without_command=True)
+@with_appcontext
+@click.pass_context
+def admin(ctx):
+    """List and manage global administrator accounts."""
+    if ctx.invoked_subcommand is None:
+        admins = models.User.query.filter_by(global_admin=True).order_by(models.User.email)
+        for account in admins.all():
+            click.echo(account.email)
+
+
+@admin.command('add')
+@click.argument('username')
+@with_appcontext
+def admin_add(username):
+    """Grant global administrator privileges to a user."""
+    email = _user_email(username)
+    account = models.db.session.get(models.User, email)
+    if not account:
+        raise click.ClickException(f'user {email!r} does not exist')
+    account.global_admin = True
+    db.session.commit()
+    click.echo(f"added global administrator {email!r}")
+
+
+@admin.command('remove')
+@click.argument('username')
+@with_appcontext
+def admin_remove(username):
+    """Revoke global administrator privileges from a user."""
+    email = _user_email(username)
+    account = models.db.session.get(models.User, email)
+    if not account:
+        raise click.ClickException(f'user {email!r} does not exist')
+    account.global_admin = False
+    db.session.commit()
+    click.echo(f"removed global administrator {email!r}")
 
 
 @mailu.command()
@@ -143,14 +227,16 @@ def password(localpart, domain_name, password):
 @click.option('-u', '--max-users')
 @click.option('-a', '--max-aliases')
 @click.option('-q', '--max-quota-bytes')
+@click.option('--max-domain-quota-bytes', default=0, type=int)
 @with_appcontext
-def domain(domain_name, max_users=-1, max_aliases=-1, max_quota_bytes=0):
+def domain(domain_name, max_users=-1, max_aliases=-1, max_quota_bytes=0, max_domain_quota_bytes=0):
     """ Create a domain
     """
     domain = models.db.session.get(models.Domain, domain_name)
     if not domain:
         domain = models.Domain(name=domain_name, max_users=max_users,
-                               max_aliases=max_aliases, max_quota_bytes=max_quota_bytes)
+                               max_aliases=max_aliases, max_quota_bytes=max_quota_bytes,
+                               max_domain_quota_bytes=max_domain_quota_bytes)
         db.session.add(domain)
         db.session.commit()
 
@@ -196,19 +282,22 @@ def config_update(verbose=False, delete_objects=False):
         max_users = domain_config.get('max_users', -1)
         max_aliases = domain_config.get('max_aliases', -1)
         max_quota_bytes = domain_config.get('max_quota_bytes', 0)
+        max_domain_quota_bytes = domain_config.get('max_domain_quota_bytes', 0)
         tracked_domains.add(domain_name)
         domain = models.db.session.get(models.Domain, domain_name)
         if not domain:
             domain = models.Domain(name=domain_name,
                                    max_users=max_users,
                                    max_aliases=max_aliases,
-                                   max_quota_bytes=max_quota_bytes)
+                                   max_quota_bytes=max_quota_bytes,
+                                   max_domain_quota_bytes=max_domain_quota_bytes)
             db.session.add(domain)
             print(f'Added {domain_config}')
         else:
             domain.max_users = max_users
             domain.max_aliases = max_aliases
             domain.max_quota_bytes = max_quota_bytes
+            domain.max_domain_quota_bytes = max_domain_quota_bytes
             db.session.add(domain)
             print(f'Updated {domain_config}')
 
@@ -321,7 +410,8 @@ def config_update(verbose=False, delete_objects=False):
 
 @mailu.command()
 @click.option('-v', '--verbose', count=True, help='Increase verbosity.')
-@click.option('-s', '--secrets', is_flag=True, help='Show secret attributes in messages.')
+@click.option('-s', '--secrets', is_flag=True,
+              help='Show secret attributes in messages and import secret keys and grants.')
 @click.option('-d', '--debug', is_flag=True, help='Enable debug output.')
 @click.option('-q', '--quiet', is_flag=True, help='Quiet mode - only show errors.')
 @click.option('-c', '--color', is_flag=True, help='Force colorized output.')
@@ -342,6 +432,7 @@ def config_import(verbose=0, secrets=False, debug=False, quiet=False, color=Fals
 
     context = {
         'import': True,
+        'secrets': secrets,
         'update': update,
         'clear': not update,
         'callback': log.track_serialize,
@@ -375,7 +466,7 @@ def config_import(verbose=0, secrets=False, debug=False, quiet=False, color=Fals
 @mailu.command()
 @click.option('-f', '--full', is_flag=True, help='Include attributes with default value.')
 @click.option('-s', '--secrets', is_flag=True,
-              help='Include secret attributes (dkim-key, passwords).')
+              help='Include secret attributes (DKIM keys, OAuth2 signing key and grants, passwords).')
 @click.option('-d', '--dns', is_flag=True, help='Include dns records.')
 @click.option('-c', '--color', is_flag=True, help='Force colorized output.')
 @click.option('-o', '--output-file', 'output', default=sys.stdout, type=click.File(mode='w'),
@@ -401,6 +492,9 @@ def config_export(full=False, secrets=False, color=False, dns=False, output=None
     try:
         schema = MailuSchema(only=only, context=context)
         if as_json:
+            # Marshmallow schema options are shared; copy them so a JSON export
+            # doesn't switch later YAML loads to JSON.
+            schema.opts = copy(schema.opts)
             schema.opts.render_module = RenderJSON
             log.lexer = 'json'
             log.strip = True

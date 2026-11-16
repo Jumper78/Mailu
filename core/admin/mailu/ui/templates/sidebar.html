@@ -31,6 +31,12 @@
           <p>{% trans %}Settings{% endtrans %}</p>
         </a>
       </li>
+      <li class="nav-item" role="none">
+        <a href="{{ url_for('.quarantine_list') }}" class="nav-link" role="menuitem">
+          <i class="nav-icon fa-solid fa-box-archive"></i>
+          <p>{% trans %}Quarantine{% endtrans %}</p>
+        </a>
+      </li>
       {% if not config['PASSKEY_REQUIRED'] and not current_user.passkeys %}
       <li class="nav-item" role="none">
         <a href="{{ url_for('.user_password_change') }}" class="nav-link" role="menuitem">
@@ -66,6 +72,12 @@
         </a>
       </li>
       <li class="nav-item" role="none">
+        <a href="{{ url_for('.oauth2_token_list') }}" class="nav-link" role="menuitem">
+          <i class="nav-icon fa-solid fa-shield-halved"></i>
+          <p>{% trans %}Authorized mail apps{% endtrans %}</p>
+        </a>
+      </li>
+      <li class="nav-item" role="none">
         <a href="{{ url_for('.anonalias_list') }}" class="nav-link" role="menuitem">
           <i class="nav-icon fa-solid fa-user-secret"></i>
           <p>{% trans %}Anonymous Aliases{% endtrans %}</p>
@@ -88,6 +100,12 @@
         <a href="{{ url_for('.domain_list') }}" class="nav-link" role="menuitem">
           <i class="nav-icon fa-solid fa-envelope"></i>
           <p>{% trans %}Mail domains{% endtrans %}</p>
+        </a>
+      </li>
+      <li class="nav-item" role="none">
+        <a href="{{ url_for('.spam_settings_page') }}" class="nav-link" role="menuitem">
+          <i class="nav-icon fa-solid fa-shield-halved"></i>
+          <p>{% trans %}Spam settings{% endtrans %}</p>
         </a>
       </li>
       {%- endif %}
@@ -120,7 +138,7 @@
       {%- endif %}
 
       <li class="nav-header text-uppercase text-primary" role="none">{% trans %}Go to{% endtrans %}</li>
-      {%- if config["WEBMAIL"] != "none" and current_user.is_authenticated %}
+      {%- if available_webmails and current_user.is_authenticated %}
       <li class="nav-item" role="none">
         <a href="{{ config["WEB_WEBMAIL"] }}" class="nav-link" role="menuitem">
         <i class="nav-icon fa-regular fa-envelope"></i>
@@ -133,6 +151,14 @@
         <a href="{{ url_for('.client') }}" class="nav-link" role="menuitem">
           <i class="nav-icon fa-solid fa-laptop"></i>
           <p>{% trans %}Client setup{% endtrans %}</p>
+        </a>
+      </li>
+      {%- endif %}
+      {%- if config['WEBDAV'] == 'radicale' and current_user.is_authenticated %}
+      <li class="nav-item" role="none">
+        <a href="/webdav/.web/" class="nav-link" role="menuitem">
+          <i class="nav-icon fa-regular fa-address-book"></i>
+          <p>{% trans %}Contacts and calendars{% endtrans %}</p>
         </a>
       </li>
       {%- endif %}

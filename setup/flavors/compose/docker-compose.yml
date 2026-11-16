@@ -62,7 +62,7 @@ services:
     {% endfor %}
     networks:
       - default
-{% if webmail_type != 'none' %}
+{% if webmail_enabled %}
       - webmail
 {% endif %}
 {% if webdav_enabled %}
@@ -141,6 +141,9 @@ services:
     volumes:
       - "{{ root }}/mail:/mail"
       - "{{ root }}/overrides/dovecot:/overrides:ro"
+    # Sieve modules are loaded from this chroot, so this mount must allow executable mappings.
+    tmpfs:
+      - /mail/usr:rw,nosuid,nodev,exec,size=128m
     networks:
       - default
     {% if tika_enabled %}
@@ -291,6 +294,15 @@ services:
   webdav:
     image: ${DOCKER_ORG:-ghcr.io/mailu}/${DOCKER_PREFIX:-}radicale:${MAILU_VERSION:-{{ version }}}
     restart: always
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      # Startup repairs ownership on existing /data volumes before dropping to mailu.
+      - CHOWN
+      - SETUID
+      - SETGID
     logging:
       driver: journald
       options:
@@ -323,8 +335,8 @@ services:
     {% endif %}
   {% endif %}
 
-  # Webmail
-  {% if webmail_type != 'none' %}
+{% if webmail_enabled %}
+  # Webmail service
   webmail:
     image: ${DOCKER_ORG:-ghcr.io/mailu}/${DOCKER_PREFIX:-}webmail:${MAILU_VERSION:-{{ version }}}
     restart: always
@@ -335,12 +347,13 @@ services:
         tag: mailu-webmail
     volumes:
       - "{{ root }}/webmail:/data"
-      - "{{ root }}/overrides/{{ webmail_type }}:/overrides:ro"
+      - "{{ root }}/overrides/roundcube:/roundcube-overrides:ro"
+      - "{{ root }}/overrides/snappymail:/snappymail-overrides:ro"
     networks:
       - webmail
     depends_on:
       - front
-  {% endif %}
+{% endif %}
 
 networks:
   default:
@@ -359,7 +372,7 @@ networks:
   radicale:
     driver: bridge
 {% endif %}
-{% if webmail_type != 'none' %}
+{% if webmail_enabled %}
   webmail:
     driver: bridge
 {% endif %}

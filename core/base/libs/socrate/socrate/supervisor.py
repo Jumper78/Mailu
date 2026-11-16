@@ -62,7 +62,9 @@ def start(programs, secret_env=None):
     config.extend([
         "pidfile={}".format(SUPERVISOR_PID),
         "nodaemon=true",
-        "logfile=/dev/stdout",
+        # Foreground supervisord already logs to stdout via its stream handler.
+        # Pointing its file handler there too duplicates every supervisord log.
+        "logfile=/dev/null",
         "logfile_maxbytes=0",
         "childlogdir=/tmp",
         "loglevel=info",
@@ -96,10 +98,10 @@ def start(programs, secret_env=None):
             "command={}".format(shlex.join(command)),
             "directory={}".format(program.get("directory", program_directory)),
             "priority={}".format(program.get("priority", 999)),
-            "autostart=true",
-            "autorestart=true",
-            "startsecs=1",
-            "startretries=3",
+            "autostart={}".format("true" if program.get("autostart", True) else "false"),
+            "autorestart={}".format("true" if program.get("autorestart", True) else "false"),
+            "startsecs={}".format(program.get("startsecs", 1)),
+            "startretries={}".format(program.get("startretries", 3)),
             "stopsignal=TERM",
             "stopwaitsecs=30",
             "stopasgroup=true",

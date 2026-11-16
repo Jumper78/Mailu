@@ -7,6 +7,7 @@ import flask_bootstrap
 from mailu import utils, debug, models, manage, configuration
 from mailu.gunicorn_logging import Logger, NoPingFilter
 import logging
+from urllib.parse import urlsplit, urlunsplit
 
 import hmac
 
@@ -59,9 +60,11 @@ def create_app_from_config(config):
     # TODO: move this to blueprints when needed
     @app.context_processor
     def inject_defaults():
+        from mailu import webmail
         signup_domains = models.Domain.query.filter_by(signup_enabled=True).all()
         return dict(
             signup_domains= signup_domains,
+            available_webmails=webmail.available(app.config),
             config        = app.config,
             get_locale    = utils.get_locale,
         )
@@ -89,15 +92,31 @@ def create_app_from_config(config):
     app.route('/ping')(ping)
 
     # Import views
-    from mailu import ui, internal, sso, api
+    from mailu import ui, internal, sso, api, oauth2
     from mailu.ui.views.users import wkd_lookup, wkd_policy
     app.register_blueprint(ui.ui, url_prefix=app.config['WEB_ADMIN'])
     app.add_url_rule('/.well-known/openpgpkey/hu/<key_hash>', 'wkd_lookup', wkd_lookup)
     app.add_url_rule('/.well-known/openpgpkey/<domain_name>/hu/<key_hash>', 'wkd_advanced_lookup', wkd_lookup)
     app.add_url_rule('/.well-known/openpgpkey/policy', 'wkd_policy', wkd_policy)
     app.add_url_rule('/.well-known/openpgpkey/<domain_name>/policy', 'wkd_advanced_policy', wkd_policy)
+    @app.get('/.well-known/webauthn')
+    def webauthn_related_origins():
+        origins = [
+            f'https://{hostname}'
+            for hostname in app.config['HOSTNAMES'].split(',')
+        ]
+        response = flask.jsonify(origins=origins)
+        response.headers['Cache-Control'] = 'public, max-age=3600'
+        return response
+
     app.register_blueprint(internal.internal, url_prefix='/internal')
     app.register_blueprint(sso.sso, url_prefix='/sso')
+    oauth2_prefix = f"{app.config['WEB_ADMIN'].rstrip('/')}/oauth2"
+    app.register_blueprint(oauth2.oauth2, url_prefix=oauth2_prefix)
+    app.add_url_rule(
+        '/.well-known/oauth-authorization-server',
+        'oauth2_server_metadata', oauth2.server_metadata,
+    )
     api.register(app, web_api_root=app.config.get('WEB_API'))
     @app.after_request
     def add_wkd_cors_headers(response):
@@ -109,6 +128,25 @@ def create_app_from_config(config):
         return response
 
     from mailu.auth_flow import enforce_pending_actions
+
+    @app.before_request
+    def redirect_unknown_hostname():
+        if (app.testing or flask.request.path in ('/ping', '/.well-known/webauthn')
+                or flask.request.path.startswith(('/internal/', '/.well-known/openpgpkey/'))):
+            return None
+        request_hostname = (
+            urlsplit(f'//{flask.request.host}').hostname or ''
+        ).lower().rstrip('.')
+        configured_hostnames = {
+            hostname.lower().rstrip('.')
+            for hostname in app.config['HOSTNAMES'].split(',')
+        }
+        if request_hostname not in configured_hostnames:
+            target = urlsplit(flask.request.url)._replace(
+                netloc=app.config['HOSTNAME'],
+            )
+            return flask.redirect(urlunsplit(target), code=302)
+
     app.before_request(enforce_pending_actions)
     return app
 

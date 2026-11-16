@@ -64,6 +64,32 @@ class ConfirmationForm(flask_wtf.FlaskForm):
     submit = fields.SubmitField(_('Confirm'))
 
 
+class SpamSettingsForm(flask_wtf.FlaskForm):
+    """Global Rspamd maps, shared by administrators of every domain."""
+    arc_signers = fields.TextAreaField(_('Trusted ARC signer domains'), [validators.Length(max=65536)])
+    greylist_ips = fields.TextAreaField(_('Greylist whitelist IPs and CIDRs'), [validators.Length(max=65536)])
+    greylist_domains = fields.TextAreaField(_('Greylist whitelist domains'), [validators.Length(max=65536)])
+    url_regexps = fields.TextAreaField(_('URL patterns to reject'), [validators.Length(max=65536)])
+    blacklist_domains = fields.TextAreaField(_('Blacklisted sender domains'), [validators.Length(max=65536)])
+    whitelist_domains = fields.TextAreaField(_('Whitelisted sender domains'), [validators.Length(max=65536)])
+    redirector_domains = fields.TextAreaField(_('URL redirector domains'), [validators.Length(max=65536)])
+    summary_enabled = fields.BooleanField(_('Enable quarantine summary emails'), default=True)
+    summary_periodicity = fields.RadioField(_('Summary frequency'), choices=[
+        ('1d', _('Every day')),
+        ('1w', _('Every week')),
+        ('1m', _('Every month')),
+    ], default='1w', widget=widgets.ListWidget(prefix_label=False), option_widget=widgets.RadioInput())
+    summary_subject = fields.StringField(_('Summary email subject'), [
+        validators.DataRequired(), validators.Length(max=255),
+        validators.Regexp(r'^[^\r\n]+\Z', message=_('Enter a subject on one line.')),
+    ])
+    summary_template = fields.TextAreaField(_('Summary email template (HTML)'), [
+        validators.DataRequired(), validators.Length(max=65536),
+    ])
+    send_test = fields.SubmitField(_('Send me a test'))
+    submit = fields.SubmitField(_('Save spam settings'))
+
+
 class DkimToggleForm(flask_wtf.FlaskForm):
     pass
 
@@ -73,6 +99,7 @@ class DomainForm(flask_wtf.FlaskForm):
     max_users = fields_.IntegerField(_('Maximum user count'), [validators.NumberRange(min=-1)], default=10)
     max_aliases = fields_.IntegerField(_('Maximum alias count'), [validators.NumberRange(min=-1)], default=10)
     max_quota_bytes = fields_.IntegerSliderField(_('Maximum user quota'), [validators.NumberRange(min=0, max=MAX_QUOTA_BYTES)], default=0)
+    max_domain_quota_bytes = fields_.IntegerSliderField(_('Maximum domain storage'), [validators.NumberRange(min=0, max=MAX_QUOTA_BYTES)], default=0)
     signup_enabled = fields.BooleanField(_('Enable sign-up'), default=False)
     anonmail_enabled = fields.BooleanField(_('Enable Global Anonymous Email Service'), default=False)
     passkey_require_enrollment = fields.BooleanField(_('Require all users to enroll a passkey'), default=False)
@@ -80,32 +107,32 @@ class DomainForm(flask_wtf.FlaskForm):
     passkey_aaguid_mode = fields.RadioField(_('AAGUID list behavior'), choices=[
         ('allow', _('Allow only listed AAGUIDs')),
         ('block', _('Block listed AAGUIDs')),
-    ], default='allow')
+    ], default='allow', widget=widgets.ListWidget(prefix_label=False), option_widget=widgets.RadioInput())
     passkey_aaguids = fields.TextAreaField(_('AAGUIDs (one UUID per line)'), [validators.Optional()])
     passkey_require_uv = fields.BooleanField(_('Require user verification (PIN or biometrics)'), default=True)
-    passkey_backup_eligible_policy = fields.SelectField(_('Backup eligibility policy'), choices=[
+    passkey_backup_eligible_policy = fields.RadioField(_('Backup eligibility policy'), choices=[
         ('optional', _('Optional')),
         ('require', _('Require backup-eligible passkeys')),
         ('deny', _('Deny backup-eligible passkeys')),
-    ], default='optional')
-    passkey_backup_state_policy = fields.SelectField(_('Backup state policy'), choices=[
+    ], default='optional', widget=widgets.ListWidget(prefix_label=False), option_widget=widgets.RadioInput())
+    passkey_backup_state_policy = fields.RadioField(_('Backup state policy'), choices=[
         ('optional', _('Optional')),
         ('require', _('Require passkeys to be currently backed up')),
         ('deny', _('Deny currently backed-up passkeys')),
-    ], default='optional')
+    ], default='optional', widget=widgets.ListWidget(prefix_label=False), option_widget=widgets.RadioInput())
     passkey_require_sign_count_increase = fields.BooleanField(_('Require signature counter to increase at every login'), default=False)
-    passkey_attestation_policy = fields.SelectField(_('Authenticator attestation policy'), choices=[
+    passkey_attestation_policy = fields.RadioField(_('Authenticator attestation policy'), choices=[
         ('optional', _('Optional')),
         ('require', _('Require an attestation statement')),
         ('deny', _('Deny an attestation statement')),
-    ], default='optional')
+    ], default='optional', widget=widgets.ListWidget(prefix_label=False), option_widget=widgets.RadioInput())
     passkey_device_bound = fields.BooleanField(_('Only allow device-bound passkeys'), default=False)
-    passkey_resident_key = fields.SelectField(
+    passkey_resident_key = fields.RadioField(
         _('Resident passkey preference'), choices=[
             ('discouraged', _('Discouraged')),
             ('preferred', _('Preferred')),
             ('required', _('Required')),
-        ], default='preferred',
+        ], default='preferred', widget=widgets.ListWidget(prefix_label=False), option_widget=widgets.RadioInput(),
     )
     comment = fields.StringField(_('Comment'), render_kw=AUTOFOCUS)
     submit = fields.SubmitField(_('Save'))
@@ -127,31 +154,31 @@ class DomainPasskeyPolicyForm(flask_wtf.FlaskForm):
     passkey_aaguid_mode = fields.RadioField(_('AAGUID list behavior'), choices=[
         ('allow', _('Allow only listed AAGUIDs')),
         ('block', _('Block listed AAGUIDs')),
-    ], default='allow')
+    ], default='allow', widget=widgets.ListWidget(prefix_label=False), option_widget=widgets.RadioInput())
     passkey_aaguids = fields.TextAreaField(_('AAGUIDs (one UUID per line)'), [validators.Optional()])
     passkey_require_uv = fields.BooleanField(_('Require user verification (PIN or biometrics)'), default=True)
-    passkey_backup_eligible_policy = fields.SelectField(_('Backup eligibility policy'), choices=[
+    passkey_backup_eligible_policy = fields.RadioField(_('Backup eligibility policy'), choices=[
         ('optional', _('Optional')),
         ('require', _('Require backup-eligible passkeys')),
         ('deny', _('Deny backup-eligible passkeys')),
-    ], default='optional')
-    passkey_backup_state_policy = fields.SelectField(_('Backup state policy'), choices=[
+    ], default='optional', widget=widgets.ListWidget(prefix_label=False), option_widget=widgets.RadioInput())
+    passkey_backup_state_policy = fields.RadioField(_('Backup state policy'), choices=[
         ('optional', _('Optional')),
         ('require', _('Require passkeys to be currently backed up')),
         ('deny', _('Deny currently backed-up passkeys')),
-    ], default='optional')
+    ], default='optional', widget=widgets.ListWidget(prefix_label=False), option_widget=widgets.RadioInput())
     passkey_require_sign_count_increase = fields.BooleanField(_('Require signature counter to increase at every login'), default=False)
-    passkey_attestation_policy = fields.SelectField(_('Authenticator attestation policy'), choices=[
+    passkey_attestation_policy = fields.RadioField(_('Authenticator attestation policy'), choices=[
         ('optional', _('Optional')),
         ('require', _('Require an attestation statement')),
         ('deny', _('Deny an attestation statement')),
-    ], default='optional')
+    ], default='optional', widget=widgets.ListWidget(prefix_label=False), option_widget=widgets.RadioInput())
     passkey_device_bound = fields.BooleanField(_('Only allow device-bound passkeys'), default=False)
-    passkey_resident_key = fields.SelectField(_('Resident passkey preference'), choices=[
+    passkey_resident_key = fields.RadioField(_('Resident passkey preference'), choices=[
         ('discouraged', _('Discouraged')),
         ('preferred', _('Preferred')),
         ('required', _('Required')),
-    ], default='preferred')
+    ], default='preferred', widget=widgets.ListWidget(prefix_label=False), option_widget=widgets.RadioInput())
     submit = fields.SubmitField(_('Save'))
 
     def validate_passkey_aaguids(form, field):
@@ -218,6 +245,7 @@ class UserSignupFormCaptcha(UserSignupForm):
     captcha = flask_wtf.RecaptchaField()
 
 class UserSettingsForm(flask_wtf.FlaskForm):
+    webmail_preference = fields.RadioField(_('Preferred webmail'), choices=[], validators=[validators.Optional()])
     displayed_name = fields.StringField(_('Displayed name'), render_kw=AUTOFOCUS)
     gpg_key = fields.TextAreaField(_('OpenPGP public key'), [validators.Optional(), validators.Length(max=65536)])
     submit_gpg_key = fields.SubmitField(_('Publish OpenPGP key'))

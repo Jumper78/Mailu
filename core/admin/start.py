@@ -11,17 +11,25 @@ from socrate import system, supervisor
 
 os.system("chown mailu:mailu -R /dkim")
 os.system("find /data | grep -v /fetchmail | xargs -n1 chown mailu:mailu")
-system.set_env(['SECRET'])
+system.set_env(['SECRET', 'QUARANTINE'])
 
 admin_secrets = {
     name: os.environ[name]
     for name in (
-        "SECRET_KEY", "SECRET_KEY_FILE",
+        "SECRET_KEY", "SECRET_KEY_FILE", "QUARANTINE_KEY",
         "DB_PW", "DB_PW_FILE",
         "SQLALCHEMY_DATABASE_URI", "SQLALCHEMY_DATABASE_URI_FILE",
         "SQLALCHEMY_DATABASE_URI_ROUNDCUBE", "SQLALCHEMY_DATABASE_URI_ROUNDCUBE_FILE",
         "RECAPTCHA_PRIVATE_KEY", "RECAPTCHA_PRIVATE_KEY_FILE",
         "API_TOKEN", "API_TOKEN_FILE",
+    )
+    if name in os.environ
+}
+cleanup_secrets = {
+    name: os.environ[name]
+    for name in (
+        "SECRET_KEY", "SECRET_KEY_FILE", "DB_PW", "DB_PW_FILE",
+        "SQLALCHEMY_DATABASE_URI", "SQLALCHEMY_DATABASE_URI_FILE",
     )
     if name in os.environ
 }
@@ -38,18 +46,15 @@ run_as_mailu("flask", "mailu", "advertise")
 if run_as_mailu("flask", "db", "upgrade") != 0:
     log.critical("Database migrations failed; refusing to start the admin service")
     sys.exit(1)
+if run_as_mailu("flask", "mailu", "cleanup-oauth2") != 0:
+    log.warning("Cleaning expired OAuth records failed; startup will continue")
 if run_as_mailu("flask", "mailu", "import-legacy-dkim-keys") != 0:
     log.critical("Importing legacy DKIM keys failed; refusing to start the admin service")
     sys.exit(1)
 
-account = os.environ.get("INITIAL_ADMIN_ACCOUNT")
-domain = os.environ.get("INITIAL_ADMIN_DOMAIN")
-password = os.environ.get("INITIAL_ADMIN_PW")
-
-if account is not None and domain is not None and password is not None:
-    mode = os.environ.get("INITIAL_ADMIN_MODE", default="ifmissing")
-    log.info("Creating initial admin account %s@%s with mode %s", account, domain, mode)
-    run_as_mailu("flask", "mailu", "admin", account, domain, password, "--mode", mode)
+if run_as_mailu("flask", "mailu", "migrate-quarantine-storage") != 0:
+    log.critical("Quarantine storage migration failed; refusing to start the admin service")
+    sys.exit(1)
 
 def test_unsupported():
     import codecs
@@ -125,6 +130,17 @@ if log.root.level <= log.INFO:
 cmdline.append("mailu:create_app()")
 
 supervisor.start(
-    [{"name": "admin", "command": cmdline, "user": "mailu", "environment": {"HOME": "/app"}}],
-    secret_env={"admin": admin_secrets},
+    [
+        {"name": "admin", "command": cmdline, "user": "mailu", "environment": {"HOME": "/app"}},
+        {
+            "name": "quarantine-cleanup",
+            "command": ["/app/venv/bin/python", "/quarantine_cleanup.py"],
+            "user": "mailu",
+            "environment": {
+                "PYTHONPATH": "/app",
+                "QUARANTINE_RETENTION_DAYS": os.environ.get("QUARANTINE_RETENTION_DAYS", "90"),
+            },
+        },
+    ],
+    secret_env={"admin": admin_secrets, "quarantine-cleanup": cleanup_secrets},
 )

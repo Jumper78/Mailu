@@ -8,10 +8,16 @@ LABEL version=$VERSION
 
 RUN set -euxo pipefail \
   ; apk add --no-cache dovecot dovecot-lua dovecot-lmtpd dovecot-pigeonhole-plugin dovecot-pop3d dovecot-submissiond rspamd-client dovecot-fts-flatcurve lua-json4 \
+  ; addgroup -S dovecot-proxy \
   ; mkdir /var/lib/dovecot
 
 COPY conf/ /conf/
 COPY start.py /
+COPY migrate_mail.py /
+COPY provision_mailbox.py /
+COPY rebuild_fts.py /
+COPY fts_settings.py /
+COPY supervisor-healthcheck /usr/local/bin/supervisor-healthcheck
 
 RUN echo $VERSION >/version
 

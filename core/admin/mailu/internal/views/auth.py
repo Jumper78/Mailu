@@ -7,6 +7,7 @@ import flask_login
 import base64
 import binascii
 import sqlalchemy.exc
+import sqlalchemy
 import urllib
 
 @internal.route("/auth/email")
@@ -84,18 +85,22 @@ def user_authentication():
         original_uri = flask.request.headers.get("X-Mailu-Original-URI", "").split("?", 1)[0]
         if original_uri.endswith("/sso.php"):
             storage_email = models.IdnaEmail.process_bind_param(flask_login, email, "")
-            aliases = models.Alias.query.filter(
+            aliases = models.db.session.query(
+                models.Alias.email, models.Alias.destination,
+            ).outerjoin(
+                models.User, models.Alias.owner_email == models.User.email,
+            ).filter(
                 sqlalchemy.cast(models.Alias.destination, sqlalchemy.String).contains(
                     storage_email, autoescape=True
-                )
+                ),
+                models.Alias.wildcard.is_(False),
+                models.Alias.disabled.is_(False),
+                sqlalchemy.or_(models.Alias.owner_email.is_(None), models.User.enabled.is_(True)),
             ).all()
             addresses = sorted({
-                models.IdnaEmail.process_bind_param(flask_login, alias.email, "")
-                for alias in aliases
-                if not alias.wildcard
-                and not alias.disabled
-                and (not alias.owner or alias.owner.enabled)
-                and storage_email in alias.destination
+                models.IdnaEmail.process_bind_param(flask_login, alias_email, "")
+                for alias_email, destinations in aliases
+                if storage_email in destinations
             })
             serialized_aliases = ",".join(addresses)
             if len(serialized_aliases) <= 2048:
@@ -109,8 +114,35 @@ def user_authentication():
 
 @internal.route("/auth/basic")
 def basic_authentication():
-    """ Tries to authenticate using the Authorization header.
+    """Authenticate device credentials, browser sessions and webmail tokens.
+
+    Nginx forwards the source address in X-Forwarded-By, replacing any
+    client-supplied value. Public DAV requests may use webmail tokens only from
+    the configured container subnet. The private webmail listener marks its
+    requests separately and is not published by Compose. An explicit
+    Authorization header never falls back to the browser session.
     """
+    context = flask.request.headers.get("X-Mailu-Auth-Context")
+    source_ip = flask.request.headers.get("X-Forwarded-By", "")
+    subnets = [app.config["SUBNET"], app.config["SUBNET6"]]
+    webmail = context == "webdav-internal"
+    if context == "webdav" and source_ip:
+        try:
+            webmail = utils.is_ip_in_subnet(source_ip, [subnet for subnet in subnets if subnet])
+        except ValueError:
+            # A missing or invalid forwarded address must never grant local access.
+            pass
+    if context == "webdav" and not flask.request.headers.get("Authorization"):
+        method = flask.request.headers.get("X-Mailu-Original-Method", "")
+        # DAV writes use non-simple HTTP methods, but also require Fetch
+        # Metadata here to prevent cross-site requests using session cookies.
+        if method in ("GET", "HEAD") or flask.request.headers.get("Sec-Fetch-Site") == "same-origin":
+            if not flask_login.current_user.is_anonymous and flask_login.current_user.enabled:
+                response = flask.Response()
+                response.headers["X-User"] = models.IdnaEmail.process_bind_param(
+                    flask_login, flask_login.current_user.email, "",
+                )
+                return response
     client_ip = flask.request.headers.get('X-Real-IP', flask.request.remote_addr)
     if utils.limiter.should_rate_limit_ip(client_ip):
         response = flask.Response(status=401)
@@ -123,6 +155,7 @@ def basic_authentication():
         try:
             user_email, password = base64.b64decode(encoded).split(b":", 1)
             user_email = user_email.decode("utf8")
+            password = password.decode("utf8")
         except (binascii.Error, ValueError, UnicodeDecodeError):
             # malformed header: fall through to the generic 401 below
             user_email = None
@@ -138,7 +171,11 @@ def basic_authentication():
                 exc = str(exc).split('\n', 1)[0]
                 app.logger.warning(f'Invalid user {user_email!r}: {exc}')
             else:
-                if user is not None and nginx.check_credentials(user, password.decode('utf-8'), client_ip, "web", flask.request.headers.get('X-Real-Port', None), user_email):
+                valid = user is not None and (
+                    (webmail and user.enabled and utils.verify_temp_token(user.get_id(), password))
+                    or nginx.check_credentials(user, password, client_ip, "web", flask.request.headers.get('X-Real-Port', None), user_email)
+                )
+                if valid:
                     response = flask.Response()
                     response.headers["X-User"] = models.IdnaEmail.process_bind_param(flask_login, user.email, "")
                     utils.limiter.exempt_ip_from_ratelimits(client_ip)

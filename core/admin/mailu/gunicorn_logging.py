@@ -10,17 +10,34 @@ from gunicorn.http2.errors import HTTP2ConnectionError
 
 class NoPingFilter(logging.Filter):
     skipAccessLogs = False
+    excludedPaths = (
+        "/ping",
+        "/internal/rspamd/local_domains",
+        "/internal/auth/admin",
+        "/internal/auth/email",
+        "/internal/auth/user",
+        "/internal/autoconfig/apple",
+        "/internal/autoconfig/microsoft",
+        "/internal/sso/start",
+    )
 
     def __init__(self, filterAccessLogs=False):
         self.skipAccessLogs = filterAccessLogs
 
     def filter(self, record):
-        if self.skipAccessLogs and record.args['r'].endswith(' HTTP/1.1'):
+        request = record.args.get('r', '') if isinstance(record.args, dict) else ''
+        if not isinstance(request, str):
+            return True
+        if self.skipAccessLogs and request.endswith(' HTTP/1.1'):
             return False
-        if record.args['r'].endswith(' /ping HTTP/1.1'):
-            return False
-        if record.args['r'].endswith(' /internal/rspamd/local_domains HTTP/1.1'):
-            return False
+        parts = request.split(" ", 2)
+        if len(parts) >= 2:
+            path = parts[1].split("?", 1)[0]
+            if any(
+                path == excluded or path.startswith(excluded + "/")
+                for excluded in self.excludedPaths
+            ):
+                return False
         return True
 
 

@@ -60,7 +60,8 @@ pcodedmp==1.2.6
 podop @ file:///app/libs/podop
 postfix-mta-sts-resolver==1.5.1
 psycopg==3.3.9
-psycopg-c==3.3.9
+psycopg-binary==3.3.9 ; platform_machine != "armv7l"
+psycopg-c==3.3.9 ; platform_machine == "armv7l"
 pycares==5.2.1
 pycparser==3.11
 Pygments==2.21.0

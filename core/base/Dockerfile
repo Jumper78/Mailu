@@ -61,9 +61,9 @@ ENV \
 # wrappers to the php it builds for.
 RUN --mount=type=secret,id=github_token,required=false set -euxo pipefail \
   ;  machine="$(apk --print-arch)" \
-  ; deps="build-base gcc libffi-dev python3-dev mariadb-dev postgresql-dev" \
+  ; deps="build-base gcc libffi-dev python3-dev mariadb-dev" \
   ; [[ "${machine}" != x86_64 ]] && \
-      deps="${deps} rust cargo cmake git libretls-dev mariadb-connector-c-dev" \
+      deps="${deps} rust cargo cmake git libretls-dev mariadb-connector-c-dev postgresql-dev" \
   ; apk add --virtual .build-deps ${deps} \
   ; set +x \
   ; github_token="$(cat /run/secrets/github_token 2>/dev/null || true)" \
